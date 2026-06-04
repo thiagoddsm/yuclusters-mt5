@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  mt5-gateway:
+    build:
+      context: ./docker/mt5-gateway
+      dockerfile: Dockerfile
+    container_name: mt5-gateway-service
+    ports:
+      - "5000:5000"
+    environment:
+      # These variables can be injected via a .env file securely in production
+      - MT5_SERVER=
+      - MT5_LOGIN=0
+      - MT5_PASSWORD=
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    restart: unless-stopped
