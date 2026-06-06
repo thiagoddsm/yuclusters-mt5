@@ -11,6 +11,8 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [activeCluster, setActiveCluster] = useState(null);
   const [lastTickTime, setLastTickTime] = useState(null);
+  const [lastBid, setLastBid] = useState(0);
+  const [lastAsk, setLastAsk] = useState(0);
 
   // Phase 2 & 4 Settings
   const [stepMultiplier, setStepMultiplier] = useState(75);
@@ -79,6 +81,8 @@ export default function App() {
       fetchHistory(); // Sync history on connection
     } else if (msg.type === 'tick') {
       setActiveCluster(msg.active);
+      if (msg.active?.bid) setLastBid(msg.active.bid);
+      if (msg.active?.ask) setLastAsk(msg.active.ask);
       // If a cluster has just closed, we receive the closed state
       if (msg.closed) {
         setHistory(prev => {
@@ -179,6 +183,8 @@ export default function App() {
             viewMode={viewMode}
             imbalanceRatio={imbalanceRatio}
             onStepChange={setStepMultiplier}
+            bid={lastBid}
+            ask={lastAsk}
           />
         </div>
 

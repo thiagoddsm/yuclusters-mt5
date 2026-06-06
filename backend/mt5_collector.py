@@ -25,6 +25,9 @@ class MT5Collector:
         self.seen_ticks_buffer = set()
         self.last_mid_price = 0.0
         self.last_is_buy = True
+        self.last_bid = 0.0
+        self.last_ask = 0.0
+        self._history_annotated = False
 
     async def connect_mt5(self) -> bool:
         """
@@ -130,6 +133,11 @@ class MT5Collector:
                     await self.disconnect_mt5()
                     continue
 
+                # Annotate history once replay is complete (first under-full batch = caught up)
+                if not self._history_annotated and len(ticks) < 1000:
+                    self._history_annotated = True
+                    await self.annotate_history_bar_volume()
+
                 if len(ticks) > 0:
                     logger.info(f"Fetched {len(ticks)} ticks starting at {ticks[0]['time_msc']}")
                     for tick in ticks:
@@ -153,6 +161,8 @@ class MT5Collector:
                         ask_price = float(tick['ask'])
                         last_price = float(tick['last'])
 
+                        if bid_price > 0: self.last_bid = bid_price
+                        if ask_price > 0: self.last_ask = ask_price
                         mid_price = (bid_price + ask_price) / 2.0 if (bid_price > 0 and ask_price > 0) else 0.0
                         prev_mid = self.last_mid_price
 
@@ -189,7 +199,22 @@ class MT5Collector:
                         # flooding the WebSocket during historical replay
                         import time as _time
                         is_live = ((_time.time() * 1000) - msc) < 10_000
+
+                        # Annotate live closed clusters with M1 bar volume
+                        if is_live and closed_json and closed_json.get('open_time') and closed_json.get('close_time'):
+                            bar_vol = await self.fetch_bar_volume(
+                                closed_json['open_time'], closed_json['close_time']
+                            )
+                            closed_json['bar_volume'] = bar_vol
+                            # Sync back to history buffer
+                            for h in self.aggregator.history:
+                                if h['cluster_id'] == closed_json['cluster_id']:
+                                    h['bar_volume'] = bar_vol
+                                    break
+
                         if is_live:
+                            active_json['bid'] = self.last_bid
+                            active_json['ask'] = self.last_ask
                             self.on_update_callback(active_json, closed_json)
 
                 await asyncio.sleep(0.1)
@@ -199,6 +224,55 @@ class MT5Collector:
                 self.connected = False
                 await self.disconnect_mt5()
                 await asyncio.sleep(2.0)
+
+    async def fetch_bar_volume(self, open_time_msc: int, close_time_msc: int) -> int:
+        """Sum tick_volume of M1 bars that overlap with the cluster's time range."""
+        from datetime import datetime
+        # Expand range by 1 minute on each side to capture partial bars
+        open_dt  = datetime.fromtimestamp((open_time_msc  - 60_000) / 1000.0)
+        close_dt = datetime.fromtimestamp((close_time_msc + 60_000) / 1000.0)
+        rates = await asyncio.to_thread(
+            mt5.copy_rates_range, self.symbol, mt5.TIMEFRAME_M1, open_dt, close_dt
+        )
+        if rates is None or len(rates) == 0:
+            return 0
+        total = 0
+        for r in rates:
+            bar_start_msc = int(r['time']) * 1000
+            bar_end_msc   = bar_start_msc + 60_000
+            # Count bar if it overlaps with cluster period
+            if bar_start_msc < close_time_msc and bar_end_msc > open_time_msc:
+                total += int(r['tick_volume'])
+        return total
+
+    async def annotate_history_bar_volume(self):
+        """Batch-fetch M1 bars and annotate all history clusters with bar_volume."""
+        if not self.aggregator.history:
+            return
+        first_open  = self.aggregator.history[0].get('open_time') or 0
+        last_close  = self.aggregator.history[-1].get('close_time') or self.aggregator.history[-1].get('open_time') or 0
+        if not first_open or not last_close:
+            return
+        from datetime import datetime
+        open_dt  = datetime.fromtimestamp((first_open  - 60_000) / 1000.0)
+        close_dt = datetime.fromtimestamp((last_close  + 60_000) / 1000.0)
+        all_rates = await asyncio.to_thread(
+            mt5.copy_rates_range, self.symbol, mt5.TIMEFRAME_M1, open_dt, close_dt
+        )
+        if all_rates is None or len(all_rates) == 0:
+            logger.warning("annotate_history_bar_volume: no M1 bars returned")
+            return
+        for cluster in self.aggregator.history:
+            c_open  = cluster.get('open_time')  or 0
+            c_close = cluster.get('close_time') or c_open
+            total = 0
+            for r in all_rates:
+                bar_start_msc = int(r['time']) * 1000
+                bar_end_msc   = bar_start_msc + 60_000
+                if bar_start_msc < c_close and bar_end_msc > c_open:
+                    total += int(r['tick_volume'])
+            cluster['bar_volume'] = total
+        logger.info(f"annotate_history_bar_volume: annotated {len(self.aggregator.history)} clusters")
 
     async def stop(self):
         self.running = False

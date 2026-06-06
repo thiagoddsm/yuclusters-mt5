@@ -18,6 +18,7 @@ class FootprintCluster:
         self.total_delta: float = 0.0
         self.total_volume: float = 0.0
         self.total_ticks: int = 0
+        self.close_time: Optional[int] = None
         
         # levels: price_float -> { 'ask': float, 'bid': float }
         # internally we keep float keys to make sorting and arithmetic easy
@@ -40,6 +41,7 @@ class FootprintCluster:
             self.open_price = price
             
         self.close_price = price
+        self.close_time = timestamp_msc
         self.total_ticks += 1
 
         # Round price to the nearest tick_size to avoid float precision issues
@@ -316,9 +318,11 @@ class FootprintCluster:
             "high": float(self.high) if self.high is not None else None,
             "low": float(self.low) if self.low is not None else None,
             "poc": float(self.poc) if self.poc is not None else None,
+            "close_time": int(self.close_time) if self.close_time is not None else None,
             "total_delta": float(self.total_delta),
             "total_volume": float(self.total_volume),
             "total_ticks": int(self.total_ticks),
+            "bar_volume": None,
             "levels": levels_str,
             "stacked": {
                 "buy": bool(self.stacked.get("buy", False)),

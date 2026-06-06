@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 
-export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultiplier = 1, viewMode = 'bidask', imbalanceRatio = 300, onStepChange }) {
+export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultiplier = 1, viewMode = 'bidask', imbalanceRatio = 300, onStepChange, bid = 0, ask = 0 }) {
   const canvasRef = useRef(null);
 
   // Navigation & Scale State
@@ -109,17 +109,21 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
       return basePrice + (diffTicks * actualTickSize);
     };
 
-    // Cumulative Delta Tracking
-    // Max volume across all clusters (for proportional volume bars in bottom panel)
-    const maxClusterVolume = Math.max(...clusters.map(c => c.total_volume || 1), 1);
-
     // Bottom panel layout
     const bottomPanelH = bottomPanelHeight;
-    const volRowH = Math.round(bottomPanelH * 0.55);
-    const deltaRowH = bottomPanelH - volRowH;
+    const panelBaseY = height - bottomPanelH;
+    const barMaxH = 52;          // max height a single bar can reach
+    const barBaseY = panelBaseY + 58;  // y where bars touch the floor
+
+    // Pre-compute max bid or ask side across all clusters (for proportional scaling)
+    const maxSideVolume = Math.max(...clusters.map(c => {
+      const lvls = Object.values(c.levels || {});
+      const b = lvls.reduce((s, l) => s + (l.bid || 0), 0);
+      const a = lvls.reduce((s, l) => s + (l.ask || 0), 0);
+      return Math.max(b, a);
+    }), 1);
 
     // Draw bottom panel background BEFORE cluster loop so bars render on top
-    const panelBaseY = height - bottomPanelH;
     ctx.fillStyle = '#0B0E14';
     ctx.fillRect(0, panelBaseY, width, bottomPanelH);
     ctx.strokeStyle = '#1E293B';
@@ -127,12 +131,6 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
     ctx.beginPath();
     ctx.moveTo(0, panelBaseY);
     ctx.lineTo(width, panelBaseY);
-    ctx.stroke();
-    ctx.strokeStyle = 'rgba(30, 41, 59, 0.8)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, panelBaseY + volRowH);
-    ctx.lineTo(width, panelBaseY + volRowH);
     ctx.stroke();
 
     // Draw Columns (Clusters)
@@ -282,8 +280,8 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
         // Single proportional bar — dominant color only, grows left to right
         const barW = Math.min((dominantVal / maxVol) * colWidth, colWidth);
         ctx.fillStyle = dominant === 'ask'
-          ? `rgba(236, 72, 153, ${alpha})`
-          : `rgba(59, 130, 246, ${alpha})`;
+          ? `rgba(59, 130, 246, ${alpha})`
+          : `rgba(236, 72, 153, ${alpha})`;
         ctx.fillRect(colX, cellY + 1, barW, rowHeight - 3);
 
 
@@ -357,44 +355,52 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
          }
       }
 
-      // Bottom Panel — two rows: Volume (top) + Delta (bottom)
-      const panelY = height - bottomPanelH;
+      // Bottom Panel — two side-by-side bars: bid (sell/red) left, ask (buy/blue) right
+      const bidTotal = pricesStr.reduce((s, p) => s + (levels[p]?.bid || 0), 0);
+      const askTotal = pricesStr.reduce((s, p) => s + (levels[p]?.ask || 0), 0);
 
-      // --- Volume row ---
+      const halfW = Math.floor((colWidth - 4) / 2);
+      const gap = 2;
+
+      // Bid bar (left, sell = red)
+      const bidBarH = Math.max(2, (bidTotal / maxSideVolume) * barMaxH);
+      ctx.fillStyle = 'rgba(210, 38, 38, 0.9)';
+      ctx.fillRect(colX + 1, barBaseY - bidBarH, halfW, bidBarH);
+
+      // Ask bar (right, buy = blue)
+      const askBarH = Math.max(2, (askTotal / maxSideVolume) * barMaxH);
+      ctx.fillStyle = 'rgba(37, 99, 235, 0.9)';
+      ctx.fillRect(colX + halfW + gap + 1, barBaseY - askBarH, halfW, askBarH);
+
+      // Volume label — white, inside the bars at the bottom
       const totalVol = cluster.total_volume || 0;
-      const volBarMaxH = volRowH - 16;
-      const volBarH = Math.max(3, (totalVol / maxClusterVolume) * volBarMaxH);
-      const volBarColor = (cluster.total_delta || 0) >= 0 ? 'rgba(30, 80, 150, 0.9)' : 'rgba(110, 30, 50, 0.9)';
-      ctx.fillStyle = volBarColor;
-      ctx.fillRect(colX + 2, panelY + volRowH - volBarH, colWidth - 4, volBarH);
-
-      // Volume label above the bar
       const volLabel = totalVol >= 1000 ? (totalVol / 1000).toFixed(1) + 'K' : totalVol.toFixed(0);
-      ctx.fillStyle = '#CBD5E1';
-      ctx.font = 'bold 12px JetBrains Mono, monospace';
+      const delta = cluster.total_delta || 0;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 11px JetBrains Mono, monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText(volLabel, colX + colWidth / 2, panelY + volRowH - volBarH - 2);
+      ctx.fillText(volLabel, colX + colWidth / 2, barBaseY - 2);
 
-      // --- Delta row ---
-      const delta = cluster.total_delta || 0;
-      ctx.fillStyle = delta >= 0 ? '#1565C0' : '#C84B00';
-      ctx.fillRect(colX + 1, panelY + volRowH + 1, colWidth - 2, deltaRowH - 2);
-
+      // Delta block with value — sits below the bars
+      const deltaBlockY = barBaseY + 2;
+      const deltaBlockH = 18;
+      ctx.fillStyle = delta >= 0 ? '#1D4ED8' : '#991B1B';
+      ctx.fillRect(colX + 1, deltaBlockY, colWidth - 2, deltaBlockH);
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 12px JetBrains Mono, monospace';
+      ctx.font = 'bold 10px JetBrains Mono, monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(delta.toFixed(0), colX + colWidth / 2, panelY + volRowH + deltaRowH / 2);
+      ctx.fillText(delta.toFixed(0), colX + colWidth / 2, deltaBlockY + deltaBlockH / 2);
 
-      // Timestamp on X axis
+      // Timestamp at the very bottom
       if (cluster.open_time) {
         const timeStr = new Date(cluster.open_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        ctx.fillStyle = '#FFFFFF';
+        ctx.fillStyle = '#94A3B8';
         ctx.font = '9px JetBrains Mono, monospace';
         ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        ctx.fillText(timeStr, colX + colWidth / 2, height - 14);
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(timeStr, colX + colWidth / 2, height - 2);
       }
       
     });
@@ -524,36 +530,6 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
       ctx.fillText('VOL PROFILE', volProfileWidth / 2, 20);
     }
 
-    // Current Price Line (latest close_price from active cluster)
-    const currentPrice = latestCluster.close_price;
-    if (currentPrice) {
-      const priceY = getPriceY(currentPrice);
-      if (priceY >= 0 && priceY <= chartHeight) {
-        // Horizontal line across chart (skip volume profile area)
-        ctx.strokeStyle = 'rgba(0, 229, 255, 0.85)';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([6, 4]);
-        ctx.beginPath();
-        ctx.moveTo(volProfileWidth, priceY);
-        ctx.lineTo(width - axisWidth, priceY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Price tag on axis
-        const decimals = tickSize < 1 ? Math.max(0, -Math.floor(Math.log10(tickSize))) : 2;
-        const priceLabel = currentPrice.toFixed(decimals);
-        const tagH = 18;
-        const tagW = axisWidth - 4;
-        ctx.fillStyle = '#00E5FF';
-        ctx.fillRect(width - axisWidth + 2, priceY - tagH / 2, tagW, tagH);
-        ctx.fillStyle = '#000';
-        ctx.font = 'bold 10px JetBrains Mono, monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(priceLabel, width - axisWidth + 2 + tagW / 2, priceY);
-      }
-    }
-
     // Draw Vertical Price Axis (Right Side)
     ctx.fillStyle = 'rgba(11, 14, 20, 0.95)';
     ctx.fillRect(width - axisWidth, 0, axisWidth, chartHeight);
@@ -565,36 +541,110 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
     ctx.lineTo(width - axisWidth, chartHeight);
     ctx.stroke();
 
-    // Render price tags along the axis
-    ctx.fillStyle = '#94A3B8';
+    // Price axis labels — show every 10 rows to keep it clean
+    const decimals = tickSize < 1 ? Math.max(0, -Math.floor(Math.log10(tickSize))) : 2;
+    const labelStep = actualTickSize * 10; // one label every 10 price rows
+    const topPrice    = getYPrice(0);
+    const bottomPrice = getYPrice(chartHeight);
+    const firstLabel  = Math.ceil(bottomPrice / labelStep) * labelStep;
+
     ctx.font = '10px JetBrains Mono, monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
 
-    // Step every rowHeight
-    const startY = 0;
-    const endY = chartHeight;
-    
-    // Draw tick labels on axis
-    for (let y = startY; y < endY; y += rowHeight) {
-      const price = getYPrice(y);
-      // Align price to tickSize
-      const roundedPrice = Math.round(price / tickSize) * tickSize;
-      const labelY = getPriceY(roundedPrice);
-      
-      // Draw grid line connection to axis
-      ctx.strokeStyle = 'rgba(30, 41, 59, 0.5)';
+    for (let p = firstLabel; p <= topPrice + labelStep; p += labelStep) {
+      const labelY = getPriceY(p);
+      if (labelY < 0 || labelY > chartHeight) continue;
+
+      // Subtle horizontal grid line
+      ctx.strokeStyle = 'rgba(30, 41, 59, 0.4)';
       ctx.lineWidth = 0.5;
       ctx.beginPath();
       ctx.moveTo(0, labelY);
       ctx.lineTo(width - axisWidth, labelY);
       ctx.stroke();
-      
-      const decimals = tickSize < 1 ? Math.max(0, -Math.floor(Math.log10(tickSize))) : 2;
+
+      // Small tick mark on axis border
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(width - axisWidth, labelY);
+      ctx.lineTo(width - axisWidth + 4, labelY);
+      ctx.stroke();
+
       ctx.fillStyle = '#64748B';
-      ctx.fillText(`${roundedPrice.toFixed(decimals)}`, width - axisWidth + 8, labelY);
+      ctx.fillText(p.toFixed(decimals), width - axisWidth + 8, labelY);
     }
-    
+
+    // Current Price Line — drawn last so it appears on top of everything
+    const currentPrice = latestCluster.close_price;
+    if (currentPrice) {
+      const priceY = getPriceY(currentPrice);
+      if (priceY >= 0 && priceY <= chartHeight) {
+        ctx.strokeStyle = 'rgba(0, 229, 255, 0.9)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(volProfileWidth, priceY);
+        ctx.lineTo(width - axisWidth, priceY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Price tag on axis (on top of axis labels)
+        const decimals = tickSize < 1 ? Math.max(0, -Math.floor(Math.log10(tickSize))) : 2;
+        const priceLabel = currentPrice.toFixed(decimals);
+        const tagH = 18;
+        const tagW = axisWidth - 4;
+        ctx.fillStyle = '#00E5FF';
+        ctx.fillRect(width - axisWidth + 2, priceY - tagH / 2, tagW, tagH);
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 10px JetBrains Mono, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(priceLabel, width - axisWidth + 2 + tagW / 2, priceY);
+
+        // Bid/Ask spread indicator below the price tag
+        if (bid > 0 && ask > 0) {
+          const askY = getPriceY(ask);
+          const bidY = getPriceY(bid);
+          const boxH = 16;
+          const boxW = tagW;
+          const boxX = width - axisWidth + 2;
+
+          // Ask box (green)
+          if (askY >= 0 && askY <= chartHeight) {
+            ctx.fillStyle = '#1B5E20';
+            ctx.fillRect(boxX, askY - boxH / 2, boxW, boxH);
+            ctx.fillStyle = '#00E676';
+            ctx.font = 'bold 9px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(ask.toFixed(decimals), boxX + boxW / 2, askY);
+          }
+
+          // Spread arrow between ask and bid
+          const midSpreadY = (askY + bidY) / 2;
+          if (midSpreadY >= 0 && midSpreadY <= chartHeight) {
+            ctx.fillStyle = '#94A3B8';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('↕', boxX + boxW / 2, midSpreadY);
+          }
+
+          // Bid box (orange/red)
+          if (bidY >= 0 && bidY <= chartHeight) {
+            ctx.fillStyle = '#7C2D00';
+            ctx.fillRect(boxX, bidY - boxH / 2, boxW, boxH);
+            ctx.fillStyle = '#FB923C';
+            ctx.font = 'bold 9px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(bid.toFixed(decimals), boxX + boxW / 2, bidY);
+          }
+        }
+      }
+    }
 
   }, [clusters, scrollOffset]);
 
@@ -644,7 +694,7 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
 
     // Price axis drag → adjust stepMultiplier
     if (isDraggingAxis.current && onStepChange) {
-      const dy = axisDragStartY.current - y;
+      const dy = y - axisDragStartY.current; // inverted: drag down = zoom in (larger step)
       const sensitivity = 4;
       const newStep = Math.max(25, Math.round((axisDragStartStep.current + dy * sensitivity) / 25) * 25);
       onStepChange(newStep);
