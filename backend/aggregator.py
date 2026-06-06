@@ -17,6 +17,7 @@ class FootprintCluster:
         self.poc: Optional[float] = None
         self.total_delta: float = 0.0
         self.total_volume: float = 0.0
+        self.total_ticks: int = 0
         
         # levels: price_float -> { 'ask': float, 'bid': float }
         # internally we keep float keys to make sorting and arithmetic easy
@@ -39,7 +40,8 @@ class FootprintCluster:
             self.open_price = price
             
         self.close_price = price
-        
+        self.total_ticks += 1
+
         # Round price to the nearest tick_size to avoid float precision issues
         rounded_price = round(price / self.tick_size) * self.tick_size
         
@@ -259,29 +261,32 @@ class FootprintCluster:
                     self.advanced_metrics["delta_divergence"] = True
 
     def should_close(self, current_time_msc: int) -> Optional[str]:
-        # Check range
-        if self.high is not None and self.low is not None:
-            points = self.high - self.low
-            # If tick_size is 1.0, range is in points. Let's compare directly.
-            # (or points/tick_size >= CLUSTER_RANGE_POINTS)
-            # Standard MT5 points. If range in points exceeds setting:
-            if points >= settings.CLUSTER_RANGE_POINTS:
-                return "range"
-                
-        # Check volume
+        mode = settings.CLUSTER_CLOSE_MODE
+
+        # Volume safety cap — always applied (prevents runaway cluster if market halts)
         if self.total_volume >= settings.CLUSTER_VOLUME_MAX:
             return "volume"
-            
-        # Check delta
-        if abs(self.total_delta) >= settings.CLUSTER_DELTA_MAX:
-            return "delta"
-            
-        # Check time
-        if self.open_time is not None:
-            elapsed = (current_time_msc - self.open_time) / 1000.0
-            if elapsed >= settings.CLUSTER_TIME_SECONDS:
-                return "time"
-                
+
+        # Primary closing condition based on configured mode
+        if mode == "delta":
+            if abs(self.total_delta) >= settings.CLUSTER_DELTA_MAX:
+                return "delta"
+
+        elif mode == "range":
+            if self.high is not None and self.low is not None:
+                if (self.high - self.low) >= settings.CLUSTER_RANGE_POINTS:
+                    return "range"
+
+        elif mode == "time":
+            if self.open_time is not None:
+                elapsed = (current_time_msc - self.open_time) / 1000.0
+                if elapsed >= settings.CLUSTER_TIME_SECONDS:
+                    return "time"
+
+        elif mode == "volume":
+            if self.total_volume >= settings.CLUSTER_VOLUME_MAX:
+                return "volume"
+
         return None
 
     def close(self, reason: str) -> None:
@@ -313,6 +318,7 @@ class FootprintCluster:
             "poc": float(self.poc) if self.poc is not None else None,
             "total_delta": float(self.total_delta),
             "total_volume": float(self.total_volume),
+            "total_ticks": int(self.total_ticks),
             "levels": levels_str,
             "stacked": {
                 "buy": bool(self.stacked.get("buy", False)),

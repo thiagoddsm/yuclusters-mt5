@@ -23,6 +23,8 @@ class MT5Collector:
         self.connected = False
         self.last_tick_time_msc = 0
         self.seen_ticks_buffer = set()
+        self.last_mid_price = 0.0
+        self.last_is_buy = True
 
     async def connect_mt5(self) -> bool:
         """
@@ -30,8 +32,8 @@ class MT5Collector:
         All MT5 calls are blocking, so they run in a thread executor.
         """
         try:
-            mt5_path = r"C:\Program Files\MetaTrader 5\terminal64.exe"
-            initialized = await asyncio.to_thread(mt5.initialize, path=mt5_path)
+            # Try to connect to any running MT5 terminal without specifying path
+            initialized = await asyncio.to_thread(mt5.initialize)
             if not initialized:
                 err = await asyncio.to_thread(mt5.last_error)
                 logger.error(f"MT5 initialize failed: {err}")
@@ -98,9 +100,9 @@ class MT5Collector:
                 else:
                     backoff = 1.0
 
-                    # Fetch from 6 hours ago so the chart isn't empty when started
+                    # Fetch from 48 hours ago so the chart isn't empty when started (covers weekends)
                     from datetime import datetime, timedelta
-                    start_time_dt = datetime.now() - timedelta(hours=6)
+                    start_time_dt = datetime.now() - timedelta(hours=48)
                     ticks = await asyncio.to_thread(
                         mt5.copy_ticks_from, self.symbol, start_time_dt, 100000, mt5.COPY_TICKS_ALL
                     )
@@ -146,20 +148,49 @@ class MT5Collector:
 
                         self.seen_ticks_buffer.add(tick_id)
 
-                        price = tick['last'] if tick['last'] > 0 else (tick['bid'] if tick['bid'] > 0 else tick['ask'])
-                        volume = tick['volume_real'] if tick['volume_real'] > 0 else float(tick['volume'])
-                        flags = tick['flags']
+                        flags = int(tick['flags'])
+                        bid_price = float(tick['bid'])
+                        ask_price = float(tick['ask'])
+                        last_price = float(tick['last'])
 
-                        # Forex ticks often have volume=0 (they are just quote updates). 
-                        # We count each quote update as 1 unit of tick volume to build the footprint.
-                        if volume == 0:
+                        mid_price = (bid_price + ask_price) / 2.0 if (bid_price > 0 and ask_price > 0) else 0.0
+                        prev_mid = self.last_mid_price
+
+                        # Update direction tracker from mid movement
+                        if mid_price > 0:
+                            if mid_price > self.last_mid_price:
+                                self.last_is_buy = True
+                            elif mid_price < self.last_mid_price:
+                                self.last_is_buy = False
+                            self.last_mid_price = mid_price
+
+                        # Determine price (use mid as best proxy for CFD quote feed)
+                        price = last_price if last_price > 0 else (mid_price if mid_price > 0 else (bid_price if bid_price > 0 else ask_price))
+
+                        # Volume = price movement in tick-size units (how the YuCluster measures activity)
+                        tick_sz = self.aggregator.tick_size if self.aggregator.tick_size > 0 else 0.01
+                        if prev_mid > 0 and mid_price > 0:
+                            price_steps = abs(mid_price - prev_mid) / tick_sz
+                            volume = max(price_steps, 1.0)
+                        else:
                             volume = 1.0
 
-                        is_buy = classify_tick(price, tick['bid'], tick['ask'], flags)
+                        # Determine direction
+                        if flags & 32:
+                            is_buy = True
+                        elif flags & 64:
+                            is_buy = False
+                        else:
+                            is_buy = self.last_is_buy
 
                         active_json, closed_json = self.aggregator.process_tick(price, volume, is_buy, msc)
 
-                        self.on_update_callback(active_json, closed_json)
+                        # Only broadcast during live trading (within 10s of now) to avoid
+                        # flooding the WebSocket during historical replay
+                        import time as _time
+                        is_live = ((_time.time() * 1000) - msc) < 10_000
+                        if is_live:
+                            self.on_update_callback(active_json, closed_json)
 
                 await asyncio.sleep(0.1)
 

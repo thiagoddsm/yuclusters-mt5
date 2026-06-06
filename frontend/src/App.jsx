@@ -11,11 +11,16 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [activeCluster, setActiveCluster] = useState(null);
   const [lastTickTime, setLastTickTime] = useState(null);
-  
+
   // Phase 2 & 4 Settings
-  const [stepMultiplier, setStepMultiplier] = useState(1);
+  const [stepMultiplier, setStepMultiplier] = useState(75);
   const [viewMode, setViewMode] = useState('bidask'); // 'bidask' or 'delta'
   const [imbalanceRatio, setImbalanceRatio] = useState(300); // percentage
+
+  // Cluster aggregator config
+  const [closeMode, setCloseMode] = useState('delta');
+  const [deltaMax, setDeltaMax] = useState(800);
+  const [configDirty, setConfigDirty] = useState(false);
   
   // Toasts
   const [toasts, setToasts] = useState([]);
@@ -26,6 +31,30 @@ export default function App() {
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 5000);
+  }, []);
+
+  // Fetch config from backend on load
+  const fetchConfig = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/config`);
+      if (res.ok) {
+        const data = await res.json();
+        setCloseMode(data.close_mode || 'delta');
+        setDeltaMax(data.delta_max || 2418);
+      }
+    } catch (e) {}
+  }, []);
+
+  // Push config update to backend
+  const applyConfig = useCallback(async (mode, delta) => {
+    try {
+      await fetch(`${API_URL}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ close_mode: mode, delta_max: delta }),
+      });
+      setConfigDirty(false);
+    } catch (e) {}
   }, []);
 
   // Fetch initial history when backend becomes reachable
@@ -54,7 +83,7 @@ export default function App() {
       if (msg.closed) {
         setHistory(prev => {
           const updated = [...prev, msg.closed];
-          if (updated.length > 50) {
+          if (updated.length > 500) {
             updated.shift();
           }
           return updated;
@@ -70,7 +99,8 @@ export default function App() {
 
   useEffect(() => {
     fetchHistory();
-  }, [fetchHistory, wsStatus]);
+    fetchConfig();
+  }, [fetchHistory, fetchConfig, wsStatus]);
 
   // Aggregate stats from history
   const totalVolume = history.reduce((acc, c) => acc + (c.total_volume || 0), 0) + (activeCluster?.total_volume || 0);
@@ -78,7 +108,10 @@ export default function App() {
   
   const allClusters = [...history];
   if (activeCluster) allClusters.push(activeCluster);
-  
+
+  // Use tick_size from the latest cluster data (set by MT5 backend)
+  const dynamicTickSize = allClusters.length > 0 ? (allClusters[allClusters.length - 1].tick_size || 0.01) : 0.01;
+
   return (
     <div className="flex flex-col h-full bg-[#0B0E14] text-slate-100 relative">
       {/* Toast Container */}
@@ -139,12 +172,13 @@ export default function App() {
       <main className="flex-1 flex overflow-hidden p-6 gap-6">
         {/* Footprint Chart Panel */}
         <div className="flex-1 flex flex-col h-full bg-[#151B26]/30 rounded-xl overflow-hidden">
-          <FootprintCanvas 
-            clusters={allClusters} 
-            tickSize={0.00001} 
+          <FootprintCanvas
+            clusters={allClusters}
+            tickSize={dynamicTickSize}
             stepMultiplier={stepMultiplier}
             viewMode={viewMode}
             imbalanceRatio={imbalanceRatio}
+            onStepChange={setStepMultiplier}
           />
         </div>
 
@@ -160,7 +194,7 @@ export default function App() {
               <div className="flex justify-between items-center text-xs">
                 <span className="text-slate-400">Target Symbol:</span>
                 <span className="font-mono font-semibold text-[#00B0FF] bg-[#00B0FF]/10 px-2 py-0.5 rounded">
-                  EURUSD
+                  USTEC
                 </span>
               </div>
               <div className="flex flex-col sm:flex-row items-center gap-6">
@@ -181,9 +215,9 @@ export default function App() {
                   <div className="flex flex-col">
                     <span className="text-[10px] text-slate-500 font-bold mb-1">PRICE STEP</span>
                     <div className="flex items-center bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
-                      <button onClick={() => setStepMultiplier(Math.max(1, stepMultiplier - 1))} className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800">-</button>
-                      <div className="px-3 py-1 text-sm font-bold text-white min-w-[30px] text-center">{stepMultiplier}</div>
-                      <button onClick={() => setStepMultiplier(stepMultiplier + 1)} className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
+                      <button onClick={() => setStepMultiplier(s => Math.max(25, s - 25))} className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800">-</button>
+                      <div className="px-3 py-1 text-sm font-bold text-white min-w-[52px] text-center">{(stepMultiplier * dynamicTickSize).toFixed(2)} pts</div>
+                      <button onClick={() => setStepMultiplier(s => s + 25)} className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
                     </div>
                   </div>
                   
@@ -228,6 +262,56 @@ export default function App() {
                 <span className="text-slate-400">Closed Clusters:</span>
                 <span className="font-mono text-slate-200">{history.length}</span>
               </div>
+            </div>
+          </section>
+
+          {/* Cluster Formation Config */}
+          <section className="bg-[#151B26] border border-slate-800 rounded-xl p-5 shadow-lg">
+            <h2 className="text-sm font-semibold text-slate-300 mb-4 border-b border-slate-800 pb-2">
+              Cluster Formation
+            </h2>
+            <div className="space-y-4 text-xs">
+              {/* Close mode */}
+              <div>
+                <span className="text-[10px] text-slate-500 font-bold block mb-1">CLOSE MODE</span>
+                <div className="flex bg-[#0B0E14] border border-slate-700 rounded-md overflow-hidden">
+                  {['delta', 'range', 'time', 'volume'].map(m => (
+                    <button
+                      key={m}
+                      onClick={() => { setCloseMode(m); setConfigDirty(true); }}
+                      className={`flex-1 py-1 text-[10px] font-semibold uppercase ${closeMode === m ? 'bg-[#00E676] text-slate-900' : 'text-slate-400 hover:bg-slate-800'}`}
+                    >{m}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Delta threshold — only relevant when mode=delta */}
+              {closeMode === 'delta' && (
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <span className="text-[10px] text-slate-500 font-bold">DELTA THRESHOLD</span>
+                    <span className="text-[10px] font-mono text-slate-300">{deltaMax.toLocaleString()}</span>
+                  </div>
+                  <input
+                    type="range" min="100" max="10000" step="50"
+                    value={deltaMax}
+                    onChange={e => { setDeltaMax(Number(e.target.value)); setConfigDirty(true); }}
+                    className="w-full accent-[#00E676] bg-slate-800 rounded-lg h-1.5 appearance-none cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[9px] text-slate-600 mt-0.5">
+                    <span>100</span><span>10 000</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Apply button */}
+              <button
+                onClick={() => applyConfig(closeMode, deltaMax)}
+                disabled={!configDirty}
+                className={`w-full py-1.5 rounded-md text-xs font-semibold transition ${configDirty ? 'bg-[#00E676] text-slate-900 hover:bg-[#00c853]' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}
+              >
+                {configDirty ? 'Apply' : 'Applied'}
+              </button>
             </div>
           </section>
 

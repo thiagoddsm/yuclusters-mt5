@@ -22,10 +22,15 @@ class AlertEngine {
   processClusters(clusters, pushToast) {
     if (!clusters || clusters.length === 0) return;
 
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+
     clusters.forEach(cluster => {
       // Only alert on closed clusters that we haven't processed yet
       if (cluster.status === 'closed' && cluster.open_time && !this.processedClusters.has(cluster.open_time)) {
         this.processedClusters.add(cluster.open_time);
+
+        // Skip historical clusters — only alert for recent data
+        if (cluster.open_time < fiveMinutesAgo) return;
         
         const adv = cluster.advanced_metrics;
         if (!adv) return;

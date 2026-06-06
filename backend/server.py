@@ -5,6 +5,7 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from typing import Set, Dict, Any, Optional
 
 # Add project root to sys.path
@@ -25,18 +26,23 @@ collector_task: Optional[asyncio.Task] = None
 def broadcast_update(active_json: dict, closed_json: Optional[dict]):
     """
     Callback executed by MT5Collector when a new tick is processed.
-    Schedules WebSocket sends on the event loop.
+    Only broadcasts when a cluster closes (not every tick) to avoid flooding during replay.
+    Removes dead connections automatically.
     """
+    if not active_connections or closed_json is None:
+        return
     message = {
         "type": "tick",
         "active": active_json,
         "closed": closed_json
     }
-    for connection in list(active_connections):
+    async def safe_send(ws: WebSocket, msg: dict):
         try:
-            asyncio.create_task(connection.send_json(message))
-        except Exception as e:
-            logger.error(f"Error sending update to client: {e}")
+            await ws.send_json(msg)
+        except Exception:
+            active_connections.discard(ws)
+    for connection in list(active_connections):
+        asyncio.create_task(safe_send(connection, message))
 
 # Initialize MT5 Collector
 collector = MT5Collector(aggregator, on_update_callback=broadcast_update)
@@ -74,6 +80,38 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+class ConfigUpdate(BaseModel):
+    close_mode: Optional[str] = None
+    delta_max: Optional[float] = None
+    volume_max: Optional[float] = None
+    range_points: Optional[float] = None
+    time_seconds: Optional[float] = None
+
+@app.get("/config")
+async def get_config():
+    return {
+        "close_mode": settings.CLUSTER_CLOSE_MODE,
+        "delta_max": settings.CLUSTER_DELTA_MAX,
+        "volume_max": settings.CLUSTER_VOLUME_MAX,
+        "range_points": settings.CLUSTER_RANGE_POINTS,
+        "time_seconds": settings.CLUSTER_TIME_SECONDS,
+    }
+
+@app.post("/config")
+async def update_config(update: ConfigUpdate):
+    if update.close_mode is not None:
+        settings.CLUSTER_CLOSE_MODE = update.close_mode
+    if update.delta_max is not None:
+        settings.CLUSTER_DELTA_MAX = update.delta_max
+    if update.volume_max is not None:
+        settings.CLUSTER_VOLUME_MAX = update.volume_max
+    if update.range_points is not None:
+        settings.CLUSTER_RANGE_POINTS = update.range_points
+    if update.time_seconds is not None:
+        settings.CLUSTER_TIME_SECONDS = update.time_seconds
+    logger.info(f"Config updated: mode={settings.CLUSTER_CLOSE_MODE}, delta_max={settings.CLUSTER_DELTA_MAX}")
+    return {"ok": True}
 
 @app.get("/history")
 async def get_history():
