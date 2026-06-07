@@ -1,7 +1,10 @@
 import uuid
 import time
+import logging
 from typing import Dict, Any, List, Optional
 from config import settings
+
+logger = logging.getLogger("aggregator")
 
 class FootprintCluster:
     def __init__(self, tick_size: float = 1.0):
@@ -48,12 +51,14 @@ class FootprintCluster:
         rounded_price = round(price / self.tick_size) * self.tick_size
         
         if rounded_price not in self.levels:
-            self.levels[rounded_price] = {"ask": 0.0, "bid": 0.0}
-            
+            self.levels[rounded_price] = {"ask": 0.0, "bid": 0.0, "ask_events": 0, "bid_events": 0}
+
         if is_buy:
             self.levels[rounded_price]["ask"] += volume
+            self.levels[rounded_price]["ask_events"] += 1
         else:
             self.levels[rounded_price]["bid"] += volume
+            self.levels[rounded_price]["bid_events"] += 1
 
         # Update High/Low
         if self.high is None or rounded_price > self.high:
@@ -104,30 +109,13 @@ class FootprintCluster:
         imbalances_buy = {}
         imbalances_sell = {}
         
+        # IMBALANCE DESATIVADO TEMPORARIAMENTE
+        # Todas as abordagens testadas geraram dots em todos os levels.
+        # Ver project_imbalance_research.md para histórico completo das tentativas.
+        # Reativar quando encontrar a abordagem correta.
         for price in sorted_prices:
-            ask_val = self.levels[price]["ask"]
-            bid_val = self.levels[price]["bid"]
-            
-            # Lower level price
-            lower_price = round((price - self.tick_size) / self.tick_size) * self.tick_size
-            bid_below = self.levels[lower_price]["bid"] if lower_price in self.levels else 0.0
-            
-            # Upper level price
-            upper_price = round((price + self.tick_size) / self.tick_size) * self.tick_size
-            ask_above = self.levels[upper_price]["ask"] if upper_price in self.levels else 0.0
-            
-            # Buy Imbalance (diagonal): ask vs bid_below
-            # Avoid triggering on 0 vs 0
-            if ask_val > 0 and ask_val >= R * bid_below:
-                imbalances_buy[price] = True
-            else:
-                imbalances_buy[price] = False
-                
-            # Sell Imbalance (diagonal): bid vs ask_above
-            if bid_val > 0 and bid_val >= R * ask_above:
-                imbalances_sell[price] = True
-            else:
-                imbalances_sell[price] = False
+            imbalances_buy[price] = False
+            imbalances_sell[price] = False
 
         # Detect stacked imbalances: 3+ consecutive levels with imbalance in the same direction
         # Let's check contiguous price levels in steps of tick_size
@@ -339,32 +327,71 @@ class Aggregator:
         self.active_cluster = FootprintCluster(tick_size=self.tick_size)
         self.history: List[Dict[str, Any]] = []
 
+    def _close_active(self, reason: str) -> Dict[str, Any]:
+        self.active_cluster.close(reason)
+        closed = self.active_cluster.to_json()
+        from datetime import datetime
+        ts = closed.get('close_time') or closed.get('open_time') or 0
+        dt = datetime.fromtimestamp(ts / 1000.0).strftime("%H:%M:%S") if ts else "?"
+        logger.info(f"CLUSTER CLOSED [{dt}] vol={closed['total_volume']:.0f} delta={closed['total_delta']:.0f} reason={reason}")
+        self.history.append(closed)
+        if len(self.history) > settings.HISTORY_BUFFER_SIZE:
+            self.history.pop(0)
+        self.active_cluster = FootprintCluster(tick_size=self.tick_size)
+        return closed
+
     def process_tick(self, price: float, volume: float, is_buy: bool, timestamp_msc: int) -> tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
         """
         Process a single tick.
+        In delta mode, splits ticks (via while loop) so no cluster ever overshoots ±CLUSTER_DELTA_MAX.
         Returns:
             (active_cluster_json, closed_cluster_json_if_just_closed)
         """
-        self.active_cluster.add_tick(price, volume, is_buy, timestamp_msc)
-        
-        # Check if the active cluster should be closed
-        close_reason = self.active_cluster.should_close(timestamp_msc)
-        
-        closed_json = None
-        if close_reason:
-            self.active_cluster.close(close_reason)
-            closed_json = self.active_cluster.to_json()
-            
-            # Save to history
-            self.history.append(closed_json)
-            if len(self.history) > settings.HISTORY_BUFFER_SIZE:
-                self.history.pop(0)
-                
-            # Start new cluster
-            self.active_cluster = FootprintCluster(tick_size=self.tick_size)
-            # The next tick will set the open_time of the new cluster.
-            
-        return self.active_cluster.to_json(), closed_json
+        last_closed = None
+
+        if settings.CLUSTER_CLOSE_MODE != "delta":
+            self.active_cluster.add_tick(price, volume, is_buy, timestamp_msc)
+            close_reason = self.active_cluster.should_close(timestamp_msc)
+            if close_reason:
+                last_closed = self._close_active(close_reason)
+            return self.active_cluster.to_json(), last_closed
+
+        remaining = volume
+
+        while remaining > 0:
+            current_delta = self.active_cluster.total_delta
+
+            # If cluster is already at/beyond threshold (from a previous leftover), close it first
+            if self.active_cluster.total_ticks > 0 and abs(current_delta) >= settings.CLUSTER_DELTA_MAX:
+                last_closed = self._close_active("delta")
+                continue
+
+            contribution = remaining if is_buy else -remaining
+            projected = current_delta + contribution
+
+            if abs(projected) <= settings.CLUSTER_DELTA_MAX:
+                # Remaining fits — add and check for any close condition
+                self.active_cluster.add_tick(price, remaining, is_buy, timestamp_msc)
+                close_reason = self.active_cluster.should_close(timestamp_msc)
+                if close_reason:
+                    last_closed = self._close_active(close_reason)
+                break
+
+            # Split: how much fits before hitting the limit
+            if is_buy:
+                capacity = settings.CLUSTER_DELTA_MAX - current_delta   # always > 0 here
+            else:
+                capacity = current_delta + settings.CLUSTER_DELTA_MAX   # always > 0 here
+
+            capacity = max(capacity, 0.0)
+
+            if capacity > 0:
+                self.active_cluster.add_tick(price, capacity, is_buy, timestamp_msc)
+
+            last_closed = self._close_active("delta")
+            remaining -= capacity
+
+        return self.active_cluster.to_json(), last_closed
 
 
 def classify_tick(last: float, bid: float, ask: float, flags: int) -> bool:
