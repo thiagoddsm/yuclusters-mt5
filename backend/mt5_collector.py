@@ -24,6 +24,7 @@ class MT5Collector:
         self.last_tick_time_msc = 0
         self.seen_ticks_buffer = set()
         self.last_mid_price = 0.0
+        self.last_bid_price = 0.0
         self.last_is_buy = True
         self.last_bid = 0.0
         self.last_ask = 0.0
@@ -88,6 +89,41 @@ class MT5Collector:
             logger.error(f"Error during MT5 shutdown: {e}")
         self.connected = False
 
+    async def _find_last_session_open(self):
+        """
+        Detecta o início da última sessão de mercado buscando o maior gap
+        nos últimos N bars M1. Um gap > 30min indica fechamento de sessão.
+        Retorna o datetime do primeiro bar após o gap (abertura de sessão).
+        """
+        from datetime import datetime, timedelta
+        SESSION_GAP_MINUTES = 30
+        LOOKBACK_BARS = 3000  # ~50h de M1
+
+        rates = await asyncio.to_thread(
+            mt5.copy_rates_from_pos, self.symbol, mt5.TIMEFRAME_M1, 0, LOOKBACK_BARS
+        )
+
+        if rates is None or len(rates) < 2:
+            logger.warning("_find_last_session_open: sem bars M1, usando HISTORY_HOURS")
+            return datetime.now() - timedelta(hours=settings.HISTORY_HOURS)
+
+        # Percorre de trás para frente procurando o maior gap (fechamento de sessão)
+        best_gap = 0
+        session_open_ts = None
+        for i in range(len(rates) - 1, 0, -1):
+            gap_sec = int(rates[i]['time']) - int(rates[i - 1]['time'])
+            if gap_sec > best_gap:
+                best_gap = gap_sec
+                session_open_ts = int(rates[i]['time'])
+
+        if session_open_ts and best_gap >= SESSION_GAP_MINUTES * 60:
+            dt = datetime.fromtimestamp(session_open_ts)
+            logger.info(f"Última abertura de sessão detectada: {dt} (gap de {best_gap//60}min)")
+            return dt
+        else:
+            logger.warning("Nenhum gap de sessão encontrado, usando HISTORY_HOURS")
+            return datetime.now() - timedelta(hours=settings.HISTORY_HOURS)
+
     async def start(self):
         self.running = True
         backoff = 1.0
@@ -103,9 +139,13 @@ class MT5Collector:
                 else:
                     backoff = 1.0
 
-                    # Fetch from 48 hours ago so the chart isn't empty when started (covers weekends)
                     from datetime import datetime, timedelta
-                    start_time_dt = datetime.now() - timedelta(hours=48)
+                    if settings.HISTORY_FROM_DATE:
+                        start_time_dt = datetime.strptime(settings.HISTORY_FROM_DATE, "%Y.%m.%d")
+                    elif settings.HISTORY_SESSION_START:
+                        start_time_dt = await self._find_last_session_open()
+                    else:
+                        start_time_dt = datetime.now() - timedelta(hours=settings.HISTORY_HOURS)
                     ticks = await asyncio.to_thread(
                         mt5.copy_ticks_from, self.symbol, start_time_dt, 100000, mt5.COPY_TICKS_ALL
                     )
@@ -165,21 +205,32 @@ class MT5Collector:
                         if ask_price > 0: self.last_ask = ask_price
                         mid_price = (bid_price + ask_price) / 2.0 if (bid_price > 0 and ask_price > 0) else 0.0
                         prev_mid = self.last_mid_price
+                        prev_bid = self.last_bid_price
 
-                        # Update direction tracker from mid movement
-                        if mid_price > 0:
+                        # Update direction tracker from bid movement (YuCluster uses Bid as price reference)
+                        if bid_price > 0:
+                            if bid_price > self.last_bid_price:
+                                self.last_is_buy = True
+                            elif bid_price < self.last_bid_price:
+                                self.last_is_buy = False
+                            self.last_bid_price = bid_price
+                        elif mid_price > 0:
                             if mid_price > self.last_mid_price:
                                 self.last_is_buy = True
                             elif mid_price < self.last_mid_price:
                                 self.last_is_buy = False
+                        if mid_price > 0:
                             self.last_mid_price = mid_price
 
                         # Determine price (use mid as best proxy for CFD quote feed)
                         price = last_price if last_price > 0 else (mid_price if mid_price > 0 else (bid_price if bid_price > 0 else ask_price))
 
-                        # Volume = price movement in tick-size units (how the YuCluster measures activity)
+                        # Volume = bid price movement in tick-size units (YuCluster: "Ticks & Bid")
                         tick_sz = self.aggregator.tick_size if self.aggregator.tick_size > 0 else 0.01
-                        if prev_mid > 0 and mid_price > 0:
+                        if prev_bid > 0 and bid_price > 0:
+                            price_steps = abs(bid_price - prev_bid) / tick_sz
+                            volume = max(price_steps, 1.0)
+                        elif prev_mid > 0 and mid_price > 0:
                             price_steps = abs(mid_price - prev_mid) / tick_sz
                             volume = max(price_steps, 1.0)
                         else:

@@ -178,36 +178,7 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
       const highestPrice = Math.max(...numericPrices);
       const lowestPrice = Math.min(...numericPrices);
 
-      // Draw Stacked Imbalance background zone if present
-      if (cluster.stacked && (cluster.stacked.buy || cluster.stacked.sell)) {
-        const stackedPrices = cluster.stacked.price_range || [];
-        if (stackedPrices.length > 0) {
-          const sHigh = Math.max(...stackedPrices);
-          const sLow = Math.min(...stackedPrices);
-          const yTop = getPriceY(sHigh) - rowHeight / 2;
-          const yBottom = getPriceY(sLow) + rowHeight / 2;
-          
-          const grad = ctx.createLinearGradient(colX - 8, yTop, colX, yTop);
-          if (cluster.stacked.buy) {
-            grad.addColorStop(0, 'rgba(0, 230, 118, 0.4)');
-            grad.addColorStop(1, 'rgba(0, 230, 118, 0.05)');
-            ctx.fillStyle = grad;
-          } else {
-            grad.addColorStop(0, 'rgba(255, 23, 68, 0.4)');
-            grad.addColorStop(1, 'rgba(255, 23, 68, 0.05)');
-            ctx.fillStyle = grad;
-          }
-          ctx.fillRect(colX - 10, yTop, 10, yBottom - yTop);
-          
-          // Draw thin outline
-          ctx.strokeStyle = cluster.stacked.buy ? '#00E676' : '#FF1744';
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(colX - 10, yTop);
-          ctx.lineTo(colX - 10, yBottom);
-          ctx.stroke();
-        }
-      }
+      // Stacked imbalance visual — to be reimplemented based on YuCluster config
 
 
       // OHLC body range — levels outside = wicks (just a line)
@@ -284,6 +255,29 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
           : `rgba(236, 72, 153, ${alpha})`;
         ctx.fillRect(colX, cellY + 1, barW, rowHeight - 3);
 
+
+        // Imbalance dots — centered in the cluster column, like YuCluster
+        if (!isWick && cellData.imbalance) {
+          const cy = cellY + rowHeight / 2;
+          const cx = colX + colWidth / 2;
+          const radius = Math.max(3, Math.min(rowHeight * 0.38, 10 * zoom));
+          const imbalColor = cellData.imbalance === 'sell' ? '#CC0000' : '#1A237E';
+
+          ctx.beginPath();
+          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+          ctx.fillStyle = imbalColor;
+          ctx.fill();
+
+          // Show number inside circle when zoomed in enough
+          if (zoom >= 1.2 && radius >= 7) {
+            const val = cellData.imbalance === 'sell' ? (cellData.bid || 0) : (cellData.ask || 0);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = `bold ${Math.floor(radius * 1.1)}px JetBrains Mono, monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(fmtK(val), cx, cy);
+          }
+        }
 
         // POC border (rectangle only at POC level)
         if (!isWick && price === cluster.poc) {
@@ -372,9 +366,9 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
       ctx.fillStyle = 'rgba(37, 99, 235, 0.9)';
       ctx.fillRect(colX + halfW + gap + 1, barBaseY - askBarH, halfW, askBarH);
 
-      // Volume label — white, inside the bars at the bottom
-      const totalVol = cluster.total_volume || 0;
-      const volLabel = totalVol >= 1000 ? (totalVol / 1000).toFixed(1) + 'K' : totalVol.toFixed(0);
+      // Volume label — dominant side (max of ask/bid), matching original YuCluster display
+      const domVol = Math.max(bidTotal, askTotal);
+      const volLabel = domVol >= 1000 ? (domVol / 1000).toFixed(1) + 'K' : domVol.toFixed(0);
       const delta = cluster.total_delta || 0;
       ctx.fillStyle = '#FFFFFF';
       ctx.font = 'bold 11px JetBrains Mono, monospace';

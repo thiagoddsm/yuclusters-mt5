@@ -20,3 +20,6 @@ STACKED_MIN_COUNT = int(os.environ.get("STACKED_MIN_COUNT", 3))
 # WebSocket
 WS_PORT = int(os.environ.get("WS_PORT", 6002))
 HISTORY_BUFFER_SIZE = int(os.environ.get("HISTORY_BUFFER_SIZE", 500))
+HISTORY_HOURS = float(os.environ.get("HISTORY_HOURS", 4.0))
+HISTORY_FROM_DATE = os.environ.get("HISTORY_FROM_DATE", "")  # ex: "2026.06.04" — se definido, ignora HISTORY_HOURS
+HISTORY_SESSION_START = os.environ.get("HISTORY_SESSION_START", "true").lower() == "true"  # puxar desde a última abertura de sessão
