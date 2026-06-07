@@ -160,12 +160,8 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
             binnedLevels[binPrice].total += data.total || 0;
             binnedLevels[binPrice].delta += data.delta || 0;
             
-            const ratio = imbalanceRatio / 100.0;
-            if (binnedLevels[binPrice].ask >= binnedLevels[binPrice].bid * ratio && binnedLevels[binPrice].ask > 0) {
-               binnedLevels[binPrice].imbalance = 'buy';
-            } else if (binnedLevels[binPrice].bid >= binnedLevels[binPrice].ask * ratio && binnedLevels[binPrice].bid > 0) {
-               binnedLevels[binPrice].imbalance = 'sell';
-            }
+            // Imbalance desativado — cálculo pendente de revisão
+            binnedLevels[binPrice].imbalance = null;
          });
          levels = binnedLevels;
       }
