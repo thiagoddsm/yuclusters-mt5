@@ -22,7 +22,19 @@ export default function App() {
   // Cluster aggregator config
   const [closeMode, setCloseMode] = useState('delta');
   const [deltaMax, setDeltaMax] = useState(800);
+  const [volumeMax, setVolumeMax] = useState(1000);
+  const [timeSeconds, setTimeSeconds] = useState(300);
+  const [rangePoints, setRangePoints] = useState(10);
   const [configDirty, setConfigDirty] = useState(false);
+  const [targetSymbol, setTargetSymbol] = useState('EURUSD');
+
+  // History Mode
+  const [historicalDate, setHistoricalDate] = useState('');
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  // WebSocket Data States (Phase 5)
+  const [domData, setDomData] = useState(null);
+  const [bigTrades, setBigTrades] = useState([]);
   
   // Toasts
   const [toasts, setToasts] = useState([]);
@@ -42,18 +54,22 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setCloseMode(data.close_mode || 'delta');
-        setDeltaMax(data.delta_max || 2418);
+        setDeltaMax(data.delta_max || 800);
+        setVolumeMax(data.volume_max || 1000);
+        setTimeSeconds(data.time_seconds || 300);
+        setRangePoints(data.range_points || 10);
+        if (data.symbol) setTargetSymbol(data.symbol);
       }
     } catch (e) {}
   }, []);
 
   // Push config update to backend
-  const applyConfig = useCallback(async (mode, delta) => {
+  const applyConfig = useCallback(async (mode, delta, vol, time, range) => {
     try {
       await fetch(`${API_URL}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ close_mode: mode, delta_max: delta }),
+        body: JSON.stringify({ close_mode: mode, delta_max: delta, volume_max: vol, time_seconds: time, range_points: range }),
       });
       setConfigDirty(false);
     } catch (e) {}
@@ -96,8 +112,16 @@ export default function App() {
         // Dispatch alerts for the newly closed cluster
         AlertEngine.processClusters([msg.closed], pushToast);
       }
+      
+      if (msg.dom) {
+        setDomData(msg.dom);
+      }
+    } else if (msg.type === 'big_trade') {
+      setBigTrades(prev => [...prev.slice(-49), msg.data]); // Keep last 50
+      pushToast(`BIG TRADE: ${msg.data.is_buy ? 'BUY' : 'SELL'} ${msg.data.volume} @ ${msg.data.price}`, msg.data.is_buy ? 'info' : 'warning');
+      AlertEngine.processBigTrade(msg.data);
     }
-  }, [fetchHistory]);
+  }, [fetchHistory, pushToast]);
 
   const wsStatus = useWebSocket(WS_URL, handleWebSocketMessage);
 
@@ -108,6 +132,36 @@ export default function App() {
 
   // Aggregate stats from history
   const totalVolume = history.reduce((acc, c) => acc + (c.total_volume || 0), 0) + (activeCluster?.total_volume || 0);
+  const loadHistory = async (dateStr) => {
+    setIsLoadingHistory(true);
+    try {
+      const start = new Date(dateStr);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(dateStr);
+      end.setHours(23, 59, 59, 999);
+      
+      await fetch(`${API_URL}/history/load`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start_time: start.toISOString(), end_time: end.toISOString() })
+      });
+      setHistoricalDate(dateStr);
+    } catch (e) {
+      console.error(e);
+      pushToast('Error loading history', 'error');
+    }
+    setIsLoadingHistory(false);
+  };
+
+  const returnToLive = async () => {
+    setIsLoadingHistory(true);
+    try {
+      await fetch(`${API_URL}/history/live`, { method: 'POST' });
+      setHistoricalDate('');
+    } catch (e) {}
+    setIsLoadingHistory(false);
+  };
+
   const avgVolumePerCluster = history.length > 0 ? (history.reduce((acc, c) => acc + (c.total_volume || 0), 0) / history.length).toFixed(0) : 0;
   
   const allClusters = [...history];
@@ -133,7 +187,7 @@ export default function App() {
       </div>
 
       {/* Premium Header */}
-      <header className="flex items-center justify-between px-6 py-4 bg-[#151B26] border-b border-slate-800 shadow-md">
+      <header className="flex items-center justify-between px-6 py-4 bg-[#151B26] border-b border-slate-800 shadow-md relative z-10">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 bg-gradient-to-tr from-[#00E676] to-[#00B0FF] rounded-lg flex items-center justify-center font-bold text-lg text-white shadow-lg">
             Yu
@@ -146,8 +200,26 @@ export default function App() {
           </div>
         </div>
         
-        {/* Connection Status indicator */}
+        {/* Connection Status & History indicator */}
         <div className="flex items-center gap-6 text-sm">
+          <div className="flex items-center gap-2 mr-4 bg-[#0B0E14] border border-slate-800 p-1 rounded-lg">
+            <input 
+              type="date" 
+              value={historicalDate}
+              onChange={(e) => loadHistory(e.target.value)}
+              className="bg-transparent text-slate-300 text-xs px-2 py-1 outline-none cursor-pointer"
+              title="Load Historical Date"
+            />
+            {historicalDate && (
+              <button 
+                onClick={returnToLive}
+                className="bg-[#FF4081] text-white text-[10px] font-bold px-2 py-1 rounded hover:bg-[#F50057] transition-colors"
+              >
+                LIVE
+              </button>
+            )}
+          </div>
+
           {lastTickTime && (
             <div className="text-slate-400 text-xs hidden sm:block">
               Last Update: <span className="font-mono text-slate-300">{lastTickTime.toLocaleTimeString()}</span>
@@ -175,7 +247,17 @@ export default function App() {
       {/* Main Body Layout */}
       <main className="flex-1 flex overflow-hidden p-6 gap-6">
         {/* Footprint Chart Panel */}
-        <div className="flex-1 flex flex-col h-full bg-[#151B26]/30 rounded-xl overflow-hidden">
+        <div className="flex-1 flex flex-col h-full bg-[#151B26]/30 rounded-xl overflow-hidden relative">
+          
+          {isLoadingHistory && (
+            <div className="absolute inset-0 bg-[#0B0E14]/80 backdrop-blur-sm flex items-center justify-center z-50">
+              <div className="flex flex-col items-center">
+                <div className="w-10 h-10 border-4 border-[#00B0FF] border-t-transparent rounded-full animate-spin"></div>
+                <span className="mt-4 text-[#00B0FF] font-bold text-sm tracking-widest uppercase">Fetching History...</span>
+              </div>
+            </div>
+          )}
+
           <FootprintCanvas
             clusters={allClusters}
             tickSize={dynamicTickSize}
@@ -185,6 +267,8 @@ export default function App() {
             onStepChange={setStepMultiplier}
             bid={lastBid}
             ask={lastAsk}
+            domData={domData}
+            bigTrades={bigTrades}
           />
         </div>
 
@@ -200,7 +284,7 @@ export default function App() {
               <div className="flex justify-between items-center text-xs">
                 <span className="text-slate-400">Target Symbol:</span>
                 <span className="font-mono font-semibold text-[#00B0FF] bg-[#00B0FF]/10 px-2 py-0.5 rounded">
-                  USTEC
+                  {targetSymbol}
                 </span>
               </div>
               <div className="flex flex-col sm:flex-row items-center gap-6">
@@ -291,7 +375,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Delta threshold — only relevant when mode=delta */}
+              {/* Range thresholds */}
               {closeMode === 'delta' && (
                 <div>
                   <div className="flex justify-between mb-1">
@@ -304,15 +388,54 @@ export default function App() {
                     onChange={e => { setDeltaMax(Number(e.target.value)); setConfigDirty(true); }}
                     className="w-full accent-[#00E676] bg-slate-800 rounded-lg h-1.5 appearance-none cursor-pointer"
                   />
-                  <div className="flex justify-between text-[9px] text-slate-600 mt-0.5">
-                    <span>100</span><span>10 000</span>
+                </div>
+              )}
+              {closeMode === 'volume' && (
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <span className="text-[10px] text-slate-500 font-bold">VOLUME THRESHOLD</span>
+                    <span className="text-[10px] font-mono text-slate-300">{volumeMax.toLocaleString()}</span>
                   </div>
+                  <input
+                    type="range" min="100" max="20000" step="100"
+                    value={volumeMax}
+                    onChange={e => { setVolumeMax(Number(e.target.value)); setConfigDirty(true); }}
+                    className="w-full accent-[#00E676] bg-slate-800 rounded-lg h-1.5 appearance-none cursor-pointer"
+                  />
+                </div>
+              )}
+              {closeMode === 'time' && (
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <span className="text-[10px] text-slate-500 font-bold">TIME THRESHOLD (seconds)</span>
+                    <span className="text-[10px] font-mono text-slate-300">{timeSeconds}s</span>
+                  </div>
+                  <input
+                    type="range" min="30" max="3600" step="30"
+                    value={timeSeconds}
+                    onChange={e => { setTimeSeconds(Number(e.target.value)); setConfigDirty(true); }}
+                    className="w-full accent-[#00E676] bg-slate-800 rounded-lg h-1.5 appearance-none cursor-pointer"
+                  />
+                </div>
+              )}
+              {closeMode === 'range' && (
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <span className="text-[10px] text-slate-500 font-bold">RANGE THRESHOLD (points)</span>
+                    <span className="text-[10px] font-mono text-slate-300">{rangePoints}</span>
+                  </div>
+                  <input
+                    type="range" min="1" max="500" step="1"
+                    value={rangePoints}
+                    onChange={e => { setRangePoints(Number(e.target.value)); setConfigDirty(true); }}
+                    className="w-full accent-[#00E676] bg-slate-800 rounded-lg h-1.5 appearance-none cursor-pointer"
+                  />
                 </div>
               )}
 
               {/* Apply button */}
               <button
-                onClick={() => applyConfig(closeMode, deltaMax)}
+                onClick={() => applyConfig(closeMode, deltaMax, volumeMax, timeSeconds, rangePoints)}
                 disabled={!configDirty}
                 className={`w-full py-1.5 rounded-md text-xs font-semibold transition ${configDirty ? 'bg-[#00E676] text-slate-900 hover:bg-[#00c853]' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}
               >
@@ -358,6 +481,38 @@ export default function App() {
             Use scroll wheel to move vertical scale.<br />
             Hold Shift + scroll wheel to scroll horizontal.
           </footer>
+          {/* Trading Panel (Phase 5) */}
+          <section className="bg-[#151B26] border border-slate-800 rounded-xl p-5 shadow-lg">
+            <h2 className="text-sm font-semibold text-slate-300 mb-4 border-b border-slate-800 pb-2">
+              Trading Execution
+            </h2>
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    const res = await fetch(`${API_URL}/trade/buy`, { method: 'POST' });
+                    if (res.ok) pushToast("Buy Signal Sent (MQL5)", "info");
+                  }}
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded shadow-md transition-colors text-sm"
+                >
+                  BUY MKT
+                </button>
+                <button
+                  onClick={async () => {
+                    const res = await fetch(`${API_URL}/trade/sell`, { method: 'POST' });
+                    if (res.ok) pushToast("Sell Signal Sent (MQL5)", "warning");
+                  }}
+                  className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded shadow-md transition-colors text-sm"
+                >
+                  SELL MKT
+                </button>
+              </div>
+              <div className="text-[10px] text-slate-500 text-center leading-tight">
+                Executes via MQL5 CTrade API with OCO brackets.<br/>Latência estimada: &lt; 20ms
+              </div>
+            </div>
+          </section>
+
         </aside>
       </main>
     </div>
