@@ -44,8 +44,20 @@ def broadcast_update(active_json: dict, closed_json: Optional[dict]):
     for connection in list(active_connections):
         asyncio.create_task(safe_send(connection, message))
 
+def broadcast_history_ready():
+    """Notify all clients that historical replay is complete — they should refetch /history."""
+    if not active_connections:
+        return
+    async def _send():
+        for ws in list(active_connections):
+            try:
+                await ws.send_json({"type": "history_ready"})
+            except Exception:
+                active_connections.discard(ws)
+    asyncio.create_task(_send())
+
 # Initialize MT5 Collector
-collector = MT5Collector(aggregator, on_update_callback=broadcast_update)
+collector = MT5Collector(aggregator, on_update_callback=broadcast_update, on_history_ready_callback=broadcast_history_ready)
 
 async def _start_collector_delayed():
     """Wait a moment for the server to fully start, then begin polling MT5."""

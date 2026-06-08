@@ -15,9 +15,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("mt5_collector")
 
 class MT5Collector:
-    def __init__(self, aggregator: Aggregator, on_update_callback: Callable[[dict, Optional[dict]], Any]):
+    def __init__(self, aggregator: Aggregator, on_update_callback: Callable[[dict, Optional[dict]], Any], on_history_ready_callback: Callable = None):
         self.aggregator = aggregator
         self.on_update_callback = on_update_callback
+        self.on_history_ready_callback = on_history_ready_callback
         self.symbol = settings.MT5_SYMBOL
         self.running = False
         self.connected = False
@@ -177,6 +178,8 @@ class MT5Collector:
                 if not self._history_annotated and len(ticks) < 1000:
                     self._history_annotated = True
                     await self.annotate_history_bar_volume()
+                    if self.on_history_ready_callback:
+                        self.on_history_ready_callback()
 
                 if len(ticks) > 0:
                     logger.info(f"Fetched {len(ticks)} ticks starting at {ticks[0]['time_msc']}")

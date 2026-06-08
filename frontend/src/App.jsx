@@ -78,7 +78,9 @@ export default function App() {
     
     if (msg.type === 'init') {
       setActiveCluster(msg.active);
-      fetchHistory(); // Sync history on connection
+      fetchHistory();
+    } else if (msg.type === 'history_ready') {
+      fetchHistory(); // Replay completo — busca histórico atualizado
     } else if (msg.type === 'tick') {
       setActiveCluster(msg.active);
       if (msg.active?.bid) setLastBid(msg.active.bid);
