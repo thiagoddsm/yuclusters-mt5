@@ -25,11 +25,11 @@ collector_task: Optional[asyncio.Task] = None
 
 def broadcast_update(active_json: dict, closed_json: Optional[dict]):
     """
-    Callback executed by MT5Collector when a new tick is processed.
-    Only broadcasts when a cluster closes (not every tick) to avoid flooding during replay.
-    Removes dead connections automatically.
+    Callback executed by MT5Collector on every live tick.
+    Always broadcasts the active cluster state so the frontend updates in real-time.
+    closed_json is None between cluster closes — frontend handles that gracefully.
     """
-    if not active_connections or closed_json is None:
+    if not active_connections:
         return
     message = {
         "type": "tick",
@@ -124,7 +124,6 @@ async def websocket_endpoint(websocket: WebSocket):
     active_connections.add(websocket)
     logger.info(f"Client connected. Active connections: {len(active_connections)}")
 
-    # Send the current active cluster state on connection
     try:
         await websocket.send_json({
             "type": "init",
@@ -133,6 +132,16 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"Error sending init state: {e}")
 
+    async def heartbeat():
+        """Ping every 20s to keep the connection alive through proxies/browsers."""
+        try:
+            while True:
+                await asyncio.sleep(20)
+                await websocket.send_json({"type": "ping"})
+        except Exception:
+            pass
+
+    ping_task = asyncio.create_task(heartbeat())
     try:
         while True:
             await websocket.receive_text()
@@ -142,6 +151,8 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         active_connections.discard(websocket)
+    finally:
+        ping_task.cancel()
 
 if __name__ == "__main__":
     import uvicorn
