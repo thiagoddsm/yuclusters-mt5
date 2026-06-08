@@ -35,6 +35,10 @@ export default function App() {
   // WebSocket Data States (Phase 5)
   const [domData, setDomData] = useState(null);
   const [bigTrades, setBigTrades] = useState([]);
+
+  // Chart toolbar
+  const [showChartSettings, setShowChartSettings] = useState(false);
+  const [centerTrigger, setCenterTrigger] = useState(0);
   
   // Toasts
   const [toasts, setToasts] = useState([]);
@@ -263,6 +267,115 @@ export default function App() {
             </div>
           )}
 
+          {/* Chart Toolbar */}
+          <div className="absolute top-2 left-2 z-20 flex items-center gap-1 bg-[#0B0E14]/90 border border-slate-700 rounded-lg px-1.5 py-1">
+            {/* Align to current price */}
+            <button
+              onClick={() => setCenterTrigger(t => t + 1)}
+              title="Alinhar ao preço atual"
+              className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-[#00E676] hover:bg-slate-800 rounded transition"
+            >
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <circle cx="12" cy="12" r="3"/>
+                <line x1="12" y1="2" x2="12" y2="6"/>
+                <line x1="12" y1="18" x2="12" y2="22"/>
+                <line x1="2" y1="12" x2="6" y2="12"/>
+                <line x1="18" y1="12" x2="22" y2="12"/>
+              </svg>
+            </button>
+
+            <div className="w-px h-4 bg-slate-700"/>
+
+            {/* Settings gear */}
+            <button
+              onClick={() => setShowChartSettings(s => !s)}
+              title="Configurações do gráfico"
+              className={`w-7 h-7 flex items-center justify-center rounded transition ${showChartSettings ? 'text-[#00E676] bg-slate-800' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+            >
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor">
+                <path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a6.97 6.97 0 0 0-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+              </svg>
+            </button>
+          </div>
+
+          {/* Floating Settings Panel */}
+          {showChartSettings && (
+            <div className="absolute top-12 left-2 z-30 bg-[#0F1520] border border-slate-700 rounded-xl shadow-2xl w-64 p-4 space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Configurações</span>
+                <button onClick={() => setShowChartSettings(false)} className="text-slate-500 hover:text-white text-xs">✕</button>
+              </div>
+
+              {/* View Mode */}
+              <div>
+                <span className="text-[10px] text-slate-500 font-bold block mb-1">MODO DE EXIBIÇÃO</span>
+                <div className="flex bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
+                  <button onClick={() => setViewMode('bidask')} className={`flex-1 py-1 text-xs font-semibold ${viewMode === 'bidask' ? 'bg-[#00E676] text-slate-900' : 'text-slate-400 hover:bg-slate-800'}`}>Bid x Ask</button>
+                  <button onClick={() => setViewMode('delta')} className={`flex-1 py-1 text-xs font-semibold ${viewMode === 'delta' ? 'bg-[#00E676] text-slate-900' : 'text-slate-400 hover:bg-slate-800'}`}>Delta</button>
+                </div>
+              </div>
+
+              {/* Price Step */}
+              <div>
+                <span className="text-[10px] text-slate-500 font-bold block mb-1">PASSO DO PREÇO (ticks)</span>
+                <div className="flex items-center bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
+                  <button onClick={() => setStepMultiplier(s => Math.max(1, s - 25))} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
+                  <input
+                    type="number"
+                    min="1"
+                    value={stepMultiplier}
+                    onChange={e => setStepMultiplier(Math.max(1, Number(e.target.value) || 1))}
+                    className="flex-1 bg-transparent text-center text-sm font-bold text-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <button onClick={() => setStepMultiplier(s => s + 25)} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
+                </div>
+              </div>
+
+              {/* Close Mode */}
+              <div>
+                <span className="text-[10px] text-slate-500 font-bold block mb-1">MODO DE FECHAMENTO</span>
+                <select
+                  value={closeMode}
+                  onChange={e => { setCloseMode(e.target.value); setConfigDirty(true); }}
+                  className="w-full bg-[#151B26] border border-slate-700 rounded-md px-2 py-1.5 text-xs text-slate-300 outline-none"
+                >
+                  <option value="delta">Delta</option>
+                  <option value="volume">Volume</option>
+                  <option value="range">Range</option>
+                  <option value="time">Tempo</option>
+                </select>
+              </div>
+
+              {/* Delta Max */}
+              {closeMode === 'delta' && (
+                <div>
+                  <span className="text-[10px] text-slate-500 font-bold block mb-1">DELTA MÁX</span>
+                  <div className="flex items-center bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
+                    <button onClick={() => { setDeltaMax(d => Math.max(100, d - 100)); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
+                    <input
+                      type="number"
+                      min="100"
+                      step="100"
+                      value={deltaMax}
+                      onChange={e => { setDeltaMax(Math.max(100, Number(e.target.value) || 100)); setConfigDirty(true); }}
+                      className="flex-1 bg-transparent text-center text-sm font-bold text-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <button onClick={() => { setDeltaMax(d => d + 100); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Apply */}
+              <button
+                onClick={() => { applyConfig(closeMode, deltaMax, volumeMax, timeSeconds, rangePoints); setShowChartSettings(false); }}
+                disabled={!configDirty}
+                className={`w-full py-1.5 rounded-md text-xs font-semibold transition ${configDirty ? 'bg-[#00E676] text-slate-900 hover:bg-[#00c853]' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}
+              >
+                Aplicar
+              </button>
+            </div>
+          )}
+
           <FootprintCanvas
             clusters={allClusters}
             tickSize={dynamicTickSize}
@@ -274,6 +387,7 @@ export default function App() {
             ask={lastAsk}
             domData={domData}
             bigTrades={bigTrades}
+            centerTrigger={centerTrigger}
           />
         </div>
 
@@ -310,8 +424,14 @@ export default function App() {
                   <div className="flex flex-col">
                     <span className="text-[10px] text-slate-500 font-bold mb-1">PRICE STEP</span>
                     <div className="flex items-center bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
-                      <button onClick={() => setStepMultiplier(s => Math.max(25, s - 25))} className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800">-</button>
-                      <div className="px-3 py-1 text-sm font-bold text-white min-w-[52px] text-center">{(stepMultiplier * dynamicTickSize).toFixed(2)} pts</div>
+                      <button onClick={() => setStepMultiplier(s => Math.max(1, s - 25))} className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800">-</button>
+                      <input
+                        type="number"
+                        min="1"
+                        value={stepMultiplier}
+                        onChange={e => setStepMultiplier(Math.max(1, Number(e.target.value) || 1))}
+                        className="px-1 py-1 text-sm font-bold text-white min-w-[52px] text-center bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
                       <button onClick={() => setStepMultiplier(s => s + 25)} className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
                     </div>
                   </div>

@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 
-export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultiplier = 1, viewMode = 'bidask', imbalanceRatio = 300, onStepChange, bid = 0, ask = 0, domData = null, bigTrades = [] }) {
+export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultiplier = 1, viewMode = 'bidask', imbalanceRatio = 300, onStepChange, bid = 0, ask = 0, domData = null, bigTrades = [], centerTrigger = 0 }) {
   const canvasRef = useRef(null);
 
   // Navigation & Scale State
@@ -27,6 +27,13 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
   const colGap = 15 * zoomH;    // gap between columns
   const rowHeight = 26 * zoomV; // height of each price cell (vertical only)
   const axisWidth = 70; // width of the vertical price axis on the right
+
+  // Center on current price when triggered from toolbar
+  useEffect(() => {
+    if (centerTrigger > 0) {
+      setScrollOffset(prev => ({ ...prev, y: 0 }));
+    }
+  }, [centerTrigger]);
 
   // Auto-scroll to keep latest cluster visible whenever clusters or horizontal zoom changes
   const lastClusterCount = useRef(0);
