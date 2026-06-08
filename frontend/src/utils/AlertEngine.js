@@ -10,6 +10,8 @@ class AlertEngine {
 
   playAudio(message) {
     if ('speechSynthesis' in window) {
+      // Prevent spamming the queue
+      window.speechSynthesis.cancel();
       const msg = new SpeechSynthesisUtterance(message);
       msg.rate = 1.2;
       msg.pitch = 1.1;
@@ -17,6 +19,13 @@ class AlertEngine {
     } else {
       console.log('Audio Alert:', message);
     }
+  }
+
+  processBigTrade(trade) {
+    if (!trade) return;
+    const direction = trade.is_buy ? 'Big Buy' : 'Big Sell';
+    const volume = Math.round(trade.volume);
+    this.playAudio(`${direction} ${volume} lots!`);
   }
 
   processClusters(clusters, pushToast) {

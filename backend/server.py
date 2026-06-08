@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from config import settings
 from backend.aggregator import Aggregator
 from backend.mt5_collector import MT5Collector
+from backend.trading import send_buy_signal, send_sell_signal
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("server")
@@ -23,7 +24,7 @@ aggregator = Aggregator(tick_size=1.0)
 active_connections: Set[WebSocket] = set()
 collector_task: Optional[asyncio.Task] = None
 
-def broadcast_update(active_json: dict, closed_json: Optional[dict]):
+def broadcast_update(active_json: dict, closed_json: Optional[dict], dom_data: Optional[list] = None):
     """
     Callback executed by MT5Collector on every live tick.
     Always broadcasts the active cluster state so the frontend updates in real-time.
@@ -34,7 +35,23 @@ def broadcast_update(active_json: dict, closed_json: Optional[dict]):
     message = {
         "type": "tick",
         "active": active_json,
-        "closed": closed_json
+        "closed": closed_json,
+        "dom": dom_data
+    }
+    async def safe_send(ws: WebSocket, msg: dict):
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            active_connections.discard(ws)
+    for connection in list(active_connections):
+        asyncio.create_task(safe_send(connection, message))
+
+def broadcast_big_trade(trade_data: dict):
+    if not active_connections:
+        return
+    message = {
+        "type": "big_trade",
+        "data": trade_data
     }
     async def safe_send(ws: WebSocket, msg: dict):
         try:
@@ -57,7 +74,7 @@ def broadcast_history_ready():
     asyncio.create_task(_send())
 
 # Initialize MT5 Collector
-collector = MT5Collector(aggregator, on_update_callback=broadcast_update, on_history_ready_callback=broadcast_history_ready)
+collector = MT5Collector(aggregator, on_update_callback=broadcast_update, on_history_ready_callback=broadcast_history_ready, on_big_trade_callback=broadcast_big_trade)
 
 async def _start_collector_delayed():
     """Wait a moment for the server to fully start, then begin polling MT5."""
@@ -108,6 +125,7 @@ async def get_config():
         "volume_max": settings.CLUSTER_VOLUME_MAX,
         "range_points": settings.CLUSTER_RANGE_POINTS,
         "time_seconds": settings.CLUSTER_TIME_SECONDS,
+        "symbol": settings.MT5_SYMBOL,
     }
 
 @app.post("/config")
@@ -133,6 +151,37 @@ async def update_config(update: ConfigUpdate):
     collector.request_replay_reset()
 
     return {"ok": True}
+
+@app.post("/trade/buy")
+async def trade_buy():
+    success = send_buy_signal()
+    return {"success": success}
+
+@app.post("/trade/sell")
+async def trade_sell():
+    success = send_sell_signal()
+    return {"success": success}
+
+class HistoryLoadRequest(BaseModel):
+    start_time: str
+    end_time: str
+
+@app.post("/history/load")
+async def load_history(req: HistoryLoadRequest):
+    from datetime import datetime
+    try:
+        start_dt = datetime.fromisoformat(req.start_time)
+        end_dt = datetime.fromisoformat(req.end_time)
+        await collector.load_historical_range(start_dt, end_dt)
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Error loading history: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/history/live")
+async def return_to_live():
+    collector.return_to_live()
+    return {"success": True}
 
 @app.get("/history")
 async def get_history():

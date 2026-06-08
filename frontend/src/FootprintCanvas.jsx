@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 
-export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultiplier = 1, viewMode = 'bidask', imbalanceRatio = 300, onStepChange, bid = 0, ask = 0 }) {
+export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultiplier = 1, viewMode = 'bidask', imbalanceRatio = 300, onStepChange, bid = 0, ask = 0, domData = null, bigTrades = [] }) {
   const canvasRef = useRef(null);
 
   // Navigation & Scale State
@@ -398,19 +398,40 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
     // Draw Volume Profile Overlay Panel (Left Side)
     const volProfileWidth = 140;
     const volumeProfile = {};
+    const deltaProfile = {}; // Phase 5
     let maxProfileVolume = 0;
+    let maxDeltaAbs = 0;
+    
+    // VWAP Calculation
+    let cumulativeVolume = 0;
+    let cumulativePriceVolume = 0;
+
     clusters.forEach(cluster => {
       const lvls = cluster.levels || {};
       Object.keys(lvls).forEach(pStr => {
         const p = parseFloat(pStr);
         const data = lvls[pStr];
         const binPrice = Math.round(p / actualTickSize) * actualTickSize;
-        volumeProfile[binPrice] = (volumeProfile[binPrice] || 0) + (data.total || 0);
+        
+        const vol = data.total || 0;
+        const delta = (data.buy_vol || 0) - (data.sell_vol || 0);
+
+        volumeProfile[binPrice] = (volumeProfile[binPrice] || 0) + vol;
+        deltaProfile[binPrice] = (deltaProfile[binPrice] || 0) + delta;
+        
+        cumulativeVolume += vol;
+        cumulativePriceVolume += (binPrice * vol);
+
         if (volumeProfile[binPrice] > maxProfileVolume) {
           maxProfileVolume = volumeProfile[binPrice];
         }
+        if (Math.abs(deltaProfile[binPrice]) > maxDeltaAbs) {
+          maxDeltaAbs = Math.abs(deltaProfile[binPrice]);
+        }
       });
     });
+    
+    const vwap = cumulativeVolume > 0 ? (cumulativePriceVolume / cumulativeVolume) : null;
     
     // Value Area Calculation (70% of total volume)
     let totalDayVolume = 0;
@@ -511,13 +532,103 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
         }
         
         ctx.fillRect(0, y, barWidth, rowHeight - 2);
+        
+        // Draw Delta Profile inside the Volume bar
+        const delta = deltaProfile[pStr] || 0;
+        if (maxDeltaAbs > 0 && delta !== 0) {
+          const deltaBarWidth = (Math.abs(delta) / maxDeltaAbs) * (volProfileWidth - 5) * 0.5; // Max 50% width
+          ctx.fillStyle = delta > 0 ? 'rgba(0, 230, 118, 0.7)' : 'rgba(255, 23, 68, 0.7)';
+          ctx.fillRect(0, y + rowHeight / 2 - 2, deltaBarWidth, 4);
+        }
       });
+      
+      // Draw VWAP Line
+      if (vwap !== null) {
+        const vwapY = getPriceY(vwap);
+        ctx.strokeStyle = '#FF4081'; // Pink VWAP
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(0, vwapY);
+        ctx.lineTo(width, vwapY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        // VWAP Label
+        ctx.fillStyle = '#FF4081';
+        ctx.font = 'bold 10px JetBrains Mono, monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText('VWAP', width - axisWidth - 5, vwapY - 5);
+      }
       
       // Panel Title
       ctx.fillStyle = '#94A3B8';
       ctx.font = '10px JetBrains Mono, monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('VOL PROFILE', volProfileWidth / 2, 20);
+      ctx.fillText('VOL & DELTA PROF', volProfileWidth / 2, 20);
+    }
+
+    // --- DOM (Depth of Market) Visualization (Phase 5) ---
+    if (domData) {
+      const maxDomVol = Math.max(
+        ...((domData.asks || []).map(d => d[1])),
+        ...((domData.bids || []).map(d => d[1])),
+        1
+      );
+      const maxDomWidth = 100; // pixels
+      const domBaseX = width - axisWidth;
+
+      // Draw Asks
+      (domData.asks || []).forEach(([p, v]) => {
+        const y = getPriceY(p) - rowHeight / 2;
+        const barW = (v / maxDomVol) * maxDomWidth;
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.4)'; // Red for asks
+        ctx.fillRect(domBaseX - barW, y, barW, rowHeight - 2);
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.9)';
+        ctx.font = '9px JetBrains Mono, monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(v.toString(), domBaseX - barW - 4, y + rowHeight / 2 + 3);
+      });
+
+      // Draw Bids
+      (domData.bids || []).forEach(([p, v]) => {
+        const y = getPriceY(p) - rowHeight / 2;
+        const barW = (v / maxDomVol) * maxDomWidth;
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.4)'; // Blue for bids
+        ctx.fillRect(domBaseX - barW, y, barW, rowHeight - 2);
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.9)';
+        ctx.font = '9px JetBrains Mono, monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(v.toString(), domBaseX - barW - 4, y + rowHeight / 2 + 3);
+      });
+    }
+
+    // --- Big Trades Visualization ---
+    if (bigTrades && bigTrades.length > 0 && clusters.length > 0) {
+      // Find the last cluster's X
+      const lastColIdx = clusters.length - 1;
+      const totalClustersWidth = clusters.length * (colWidth + colGap);
+      const startX = width - axisWidth - scrollOffset.x - totalClustersWidth + 100;
+      const lastColX = startX + lastColIdx * (colWidth + colGap);
+
+      bigTrades.forEach(bt => {
+        const y = getPriceY(bt.price);
+        // Draw a glowing circle for the Big Trade
+        ctx.beginPath();
+        ctx.arc(lastColX + colWidth / 2, y, 12, 0, 2 * Math.PI);
+        ctx.fillStyle = bt.is_buy ? 'rgba(59, 130, 246, 0.8)' : 'rgba(239, 68, 68, 0.8)';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#FFF';
+        ctx.stroke();
+        
+        // Volume text
+        ctx.fillStyle = '#FFF';
+        ctx.font = 'bold 9px Outfit';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(Math.round(bt.volume).toString(), lastColX + colWidth / 2, y);
+      });
     }
 
     // Draw Vertical Price Axis (Right Side)

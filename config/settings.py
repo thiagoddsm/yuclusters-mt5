@@ -13,9 +13,10 @@ CLUSTER_DELTA_MAX = float(os.environ.get("CLUSTER_DELTA_MAX", 800))
 CLUSTER_TIME_SECONDS = float(os.environ.get("CLUSTER_TIME_SECONDS", 300))
 CLUSTER_CLOSE_MODE = os.environ.get("CLUSTER_CLOSE_MODE", "delta")  # "range" | "volume" | "delta" | "time"
 
-# Imbalance
+# Imbalance & Big Trades
 IMBALANCE_RATIO = float(os.environ.get("IMBALANCE_RATIO", 3.0))
 STACKED_MIN_COUNT = int(os.environ.get("STACKED_MIN_COUNT", 3))
+BIG_TRADE_THRESHOLD = float(os.environ.get("BIG_TRADE_THRESHOLD", 50.0))
 
 # WebSocket
 WS_PORT = int(os.environ.get("WS_PORT", 6002))

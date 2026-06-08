@@ -15,13 +15,15 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("mt5_collector")
 
 class MT5Collector:
-    def __init__(self, aggregator: Aggregator, on_update_callback: Callable[[dict, Optional[dict]], Any], on_history_ready_callback: Callable = None):
+    def __init__(self, aggregator: Aggregator, on_update_callback: Callable[[dict, Optional[dict], Optional[list]], Any], on_history_ready_callback: Callable = None, on_big_trade_callback: Optional[Callable[[dict], Any]] = None):
         self.aggregator = aggregator
         self.on_update_callback = on_update_callback
         self.on_history_ready_callback = on_history_ready_callback
+        self.on_big_trade_callback = on_big_trade_callback
         self.symbol = settings.MT5_SYMBOL
         self.running = False
         self.connected = False
+        self.historical_mode = False
         self.last_tick_time_msc = 0
         self.seen_ticks_buffer = set()
         self.last_mid_price = 0.0
@@ -77,6 +79,11 @@ class MT5Collector:
                 self.aggregator.active_cluster.tick_size = tick_size
                 logger.info(f"Set aggregator tick size to {tick_size}")
 
+            # Subscribe to Depth of Market (DOM)
+            book_added = await asyncio.to_thread(mt5.market_book_add, self.symbol)
+            if not book_added:
+                logger.warning(f"Failed to subscribe to market book (DOM) for {self.symbol}")
+
             logger.info("Successfully connected to MetaTrader 5 and logged in.")
             self.connected = True
             return True
@@ -86,6 +93,7 @@ class MT5Collector:
 
     async def disconnect_mt5(self):
         try:
+            await asyncio.to_thread(mt5.market_book_release, self.symbol)
             await asyncio.to_thread(mt5.shutdown)
         except Exception as e:
             logger.error(f"Error during MT5 shutdown: {e}")
@@ -172,6 +180,10 @@ class MT5Collector:
 
             # Polling loop
             try:
+                if self.historical_mode:
+                    await asyncio.sleep(1)
+                    continue
+
                 from datetime import datetime
                 polling_dt = datetime.fromtimestamp(self.last_tick_time_msc / 1000.0)
                 ticks = await asyncio.to_thread(
@@ -262,6 +274,18 @@ class MT5Collector:
                         else:
                             is_buy = self.last_is_buy
 
+                        # Broadcast Big Trades instantly
+                        if volume >= settings.BIG_TRADE_THRESHOLD and self.on_big_trade_callback:
+                            import time as _time
+                            is_live = ((_time.time() * 1000) - msc) < 10_000
+                            if is_live:
+                                self.on_big_trade_callback({
+                                    "price": price,
+                                    "volume": volume,
+                                    "is_buy": is_buy,
+                                    "time_msc": msc
+                                })
+
                         active_json, closed_json = self.aggregator.process_tick(price, volume, is_buy, msc)
 
                         # Only broadcast during live trading (within 10s of now) to avoid
@@ -284,15 +308,109 @@ class MT5Collector:
                         if is_live:
                             active_json['bid'] = self.last_bid
                             active_json['ask'] = self.last_ask
-                            self.on_update_callback(active_json, closed_json)
+                            
+                            # Fetch DOM
+                            dom_json = None
+                            try:
+                                book_items = await asyncio.to_thread(mt5.market_book_get, self.symbol)
+                                if book_items:
+                                    dom_json = [
+                                        {"type": item.type, "price": item.price, "volume": item.volume}
+                                        for item in book_items
+                                    ]
+                            except Exception as e:
+                                logger.error(f"Error fetching DOM: {e}")
+
+                            self.on_update_callback(active_json, closed_json, dom_json)
 
                 await asyncio.sleep(0.1)
 
             except Exception as e:
-                logger.error(f"Error during tick polling loop: {e}")
-                self.connected = False
-                await self.disconnect_mt5()
-                await asyncio.sleep(2.0)
+                logger.error(f"Error in polling loop: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                await asyncio.sleep(1.0)
+
+    async def load_historical_range(self, start_dt, end_dt):
+        """
+        Pauses live polling, clears the aggregator, fetches a specific historical date range,
+        processes all ticks into clusters, and broadcasts the completed history to clients.
+        """
+        self.historical_mode = True
+        logger.info(f"Loading historical data from {start_dt} to {end_dt} for {self.symbol}...")
+        
+        # Clear existing data
+        self.aggregator.history.clear()
+        self.aggregator.active_cluster = None
+        self.aggregator._create_new_cluster()
+        
+        # We need to fetch ticks in range.
+        ticks = await asyncio.to_thread(
+            mt5.copy_ticks_range,
+            self.symbol,
+            start_dt,
+            end_dt,
+            mt5.COPY_TICKS_ALL
+        )
+        
+        if ticks is None or len(ticks) == 0:
+            logger.warning(f"No historical ticks found for {self.symbol} in the requested range.")
+            self.on_update_callback(self.aggregator.active_cluster.to_json(), None, [])
+            return
+
+        logger.info(f"Fetched {len(ticks)} historical ticks. Processing...")
+        
+        # Process ticks without broadcasting every tick
+        for tick in ticks:
+            msc = tick['time_msc']
+            flags = int(tick['flags'])
+            bid_price = float(tick['bid'])
+            ask_price = float(tick['ask'])
+            volume = float(tick['volume_real'])
+            price = float(tick['last'])
+
+            if price <= 0.0 or volume <= 0.0:
+                continue
+
+            if bid_price > 0: self.last_bid = bid_price
+            if ask_price > 0: self.last_ask = ask_price
+            mid_price = (bid_price + ask_price) / 2.0 if (bid_price > 0 and ask_price > 0) else 0.0
+
+            if mid_price > 0:
+                if mid_price > self.last_mid_price:
+                    self.last_is_buy = True
+                elif mid_price < self.last_mid_price:
+                    self.last_is_buy = False
+                self.last_mid_price = mid_price
+
+            is_buy = self.last_is_buy
+            if flags & 32:
+                is_buy = True
+            elif flags & 64:
+                is_buy = False
+
+            # We don't trigger big trade alerts during history load to avoid spam
+            self.aggregator.process_tick(price, volume, is_buy, msc)
+
+        # Apply bar-level volume annotation
+        await self.annotate_history_bar_volume()
+        
+        # Broadcast the reconstructed history
+        active_json = self.aggregator.active_cluster.to_json() if self.aggregator.active_cluster else None
+        closed_json = [c.to_json() for c in self.aggregator.history]
+        self.on_update_callback(active_json, None, closed_json)
+        logger.info("Historical data loaded and broadcasted.")
+
+    def return_to_live(self):
+        """Resumes live polling from the current time."""
+        self.historical_mode = False
+        from datetime import datetime
+        self.last_tick_time_msc = int(datetime.now().timestamp() * 1000)
+        self.aggregator.history.clear()
+        self.aggregator.active_cluster = None
+        self.aggregator._create_new_cluster()
+        self._history_annotated = False
+        logger.info("Returned to live polling.")
 
     async def fetch_bar_volume(self, open_time_msc: int, close_time_msc: int) -> int:
         """Sum tick_volume of M1 bars that overlap with the cluster's time range."""
