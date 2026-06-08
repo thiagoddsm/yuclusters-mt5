@@ -79,8 +79,11 @@ export default function App() {
     if (msg.type === 'init') {
       setActiveCluster(msg.active);
       fetchHistory();
+    } else if (msg.type === 'reset') {
+      setHistory([]);
+      setActiveCluster(null);
     } else if (msg.type === 'history_ready') {
-      fetchHistory(); // Replay completo — busca histórico atualizado
+      fetchHistory();
     } else if (msg.type === 'tick') {
       setActiveCluster(msg.active);
       if (msg.active?.bid) setLastBid(msg.active.bid);

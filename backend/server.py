@@ -123,6 +123,15 @@ async def update_config(update: ConfigUpdate):
     if update.time_seconds is not None:
         settings.CLUSTER_TIME_SECONDS = update.time_seconds
     logger.info(f"Config updated: mode={settings.CLUSTER_CLOSE_MODE}, delta_max={settings.CLUSTER_DELTA_MAX}")
+
+    # Notify clients to clear history, then reset and replay with new config
+    for ws in list(active_connections):
+        try:
+            await ws.send_json({"type": "reset"})
+        except Exception:
+            active_connections.discard(ws)
+    collector.request_replay_reset()
+
     return {"ok": True}
 
 @app.get("/history")

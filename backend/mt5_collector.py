@@ -30,6 +30,7 @@ class MT5Collector:
         self.last_bid = 0.0
         self.last_ask = 0.0
         self._history_annotated = False
+        self._replay_reset_requested = False
 
     async def connect_mt5(self) -> bool:
         """
@@ -125,11 +126,25 @@ class MT5Collector:
             logger.warning("Nenhum gap de sessão encontrado, usando HISTORY_HOURS")
             return datetime.now() - timedelta(hours=settings.HISTORY_HOURS)
 
+    def request_replay_reset(self):
+        """Signal the polling loop to reset the aggregator and replay from session start."""
+        self.aggregator.history.clear()
+        self.aggregator.active_cluster = type(self.aggregator.active_cluster)(tick_size=self.aggregator.tick_size)
+        self._history_annotated = False
+        self._replay_reset_requested = True
+
     async def start(self):
         self.running = True
         backoff = 1.0
 
         while self.running:
+            # Config changed — restart replay from session start with new settings
+            if self._replay_reset_requested:
+                self._replay_reset_requested = False
+                self.connected = False
+                logger.info("Replay reset requested — restarting from session start...")
+                continue
+
             if not self.connected:
                 success = await self.connect_mt5()
                 if not success:
