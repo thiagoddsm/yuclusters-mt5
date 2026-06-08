@@ -377,11 +377,11 @@ class Aggregator:
                     last_closed = self._close_active(close_reason)
                 break
 
-            # Split: how much fits before hitting the limit
+            # Split exactly at CLUSTER_DELTA_MAX
             if is_buy:
-                capacity = settings.CLUSTER_DELTA_MAX - current_delta   # always > 0 here
+                capacity = settings.CLUSTER_DELTA_MAX - current_delta
             else:
-                capacity = current_delta + settings.CLUSTER_DELTA_MAX   # always > 0 here
+                capacity = current_delta + settings.CLUSTER_DELTA_MAX
 
             capacity = max(capacity, 0.0)
 
