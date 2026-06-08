@@ -5,29 +5,30 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
 
   // Navigation & Scale State
   const [scrollOffset, setScrollOffset] = useState({ x: 50, y: 0 }); // X: horizontal offset, Y: vertical offset
-  const [zoom, setZoom] = useState(1); // Zoom level
+  const [zoomH, setZoomH] = useState(1); // horizontal zoom: column width
+  const [zoomV, setZoomV] = useState(1); // vertical zoom: row height
   const [isDragging, setIsDragging] = useState(false);
   const [cursor, setCursor] = useState('grab');
   const dragStart = useRef({ x: 0, y: 0 });
   const dragOffsetStart = useRef({ x: 0, y: 0 });
 
-  // Price axis drag (scale) state
+  // Price axis drag (vertical scale) state
   const isDraggingAxis = useRef(false);
   const axisDragStartY = useRef(0);
-  const axisDragStartStep = useRef(0);
+  const axisDragStartZoomV = useRef(1);
 
   // Time axis drag (horizontal zoom) state
   const isDraggingTimeAxis = useRef(false);
   const timeAxisDragStartX = useRef(0);
-  const timeAxisDragStartZoom = useRef(1);
-  
-  // Apply zoom to sizes
-  const colWidth = 140 * zoom; // width of each cluster column
-  const colGap = 15 * zoom;    // gap between columns
-  const rowHeight = 26 * zoom; // height of each price cell
+  const timeAxisDragStartZoomH = useRef(1);
+
+  // Independent zoom dimensions
+  const colWidth = 140 * zoomH; // width of each cluster column
+  const colGap = 15 * zoomH;    // gap between columns
+  const rowHeight = 26 * zoomV; // height of each price cell (vertical only)
   const axisWidth = 70; // width of the vertical price axis on the right
 
-  // Auto-scroll to keep latest cluster visible whenever clusters or zoom changes
+  // Auto-scroll to keep latest cluster visible whenever clusters or horizontal zoom changes
   const lastClusterCount = useRef(0);
   useEffect(() => {
     if (clusters && canvasRef.current) {
@@ -40,7 +41,7 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
       setScrollOffset(prev => ({ ...prev, x: newX }));
       lastClusterCount.current = clusters.length;
     }
-  }, [clusters?.length, zoom]);
+  }, [clusters?.length, zoomH]);
 
   // Main Render Loop
   useEffect(() => {
@@ -224,7 +225,7 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
       // Max volume in cluster for proportional bars
       const maxVol = Math.max(...Object.values(levels).map(l => Math.max(l.ask || 0, l.bid || 0)), 1);
 
-      const fontSize = Math.max(6, 11 * zoom);
+      const fontSize = Math.max(6, 11 * zoomH);
       ctx.font = `bold ${fontSize}px JetBrains Mono, monospace`;
       ctx.textBaseline = 'middle';
 
@@ -256,7 +257,7 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
         if (!isWick && cellData.imbalance) {
           const cy = cellY + rowHeight / 2;
           const cx = colX + colWidth / 2;
-          const radius = Math.max(3, Math.min(rowHeight * 0.38, 10 * zoom));
+          const radius = Math.max(3, Math.min(rowHeight * 0.38, 10 * zoomH));
           const imbalColor = cellData.imbalance === 'sell' ? '#CC0000' : '#1A237E';
 
           ctx.beginPath();
@@ -265,7 +266,7 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
           ctx.fill();
 
           // Show number inside circle when zoomed in enough
-          if (zoom >= 1.2 && radius >= 7) {
+          if (zoomH >= 1.2 && radius >= 7) {
             const val = cellData.imbalance === 'sell' ? (cellData.bid || 0) : (cellData.ask || 0);
             ctx.fillStyle = '#FFFFFF';
             ctx.font = `bold ${Math.floor(radius * 1.1)}px JetBrains Mono, monospace`;
@@ -283,7 +284,7 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
         }
 
         // Number only at POC (inside bar, right-aligned)
-        if (zoom >= 0.5 && !isWick && price === cluster.poc) {
+        if (zoomH >= 0.5 && !isWick && price === cluster.poc) {
           const cy = cellY + rowHeight / 2;
           if (viewMode === 'delta') {
             const d = cellData.delta || 0;
@@ -747,7 +748,7 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
       }
     }
 
-  }, [clusters, scrollOffset]);
+  }, [clusters, scrollOffset, zoomH, zoomV, stepMultiplier, viewMode, bid, ask, domData, bigTrades]);
 
   // Mouse Interaction: Panning/Scrolling
   const handleMouseDown = (e) => {
@@ -755,11 +756,11 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // Clicking on price axis → enter scale drag mode
+    // Clicking on price axis → enter vertical zoom drag mode
     if (x > rect.width - axisWidth) {
       isDraggingAxis.current = true;
       axisDragStartY.current = y;
-      axisDragStartStep.current = stepMultiplier;
+      axisDragStartZoomV.current = zoomV;
       setCursor('ns-resize');
       return;
     }
@@ -769,7 +770,7 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
     if (y > chartH) {
       isDraggingTimeAxis.current = true;
       timeAxisDragStartX.current = x;
-      timeAxisDragStartZoom.current = zoom;
+      timeAxisDragStartZoomH.current = zoomH;
       setCursor('ew-resize');
       return;
     }
@@ -793,21 +794,19 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
       else setCursor('grab');
     }
 
-    // Price axis drag → adjust stepMultiplier
-    if (isDraggingAxis.current && onStepChange) {
-      const dy = y - axisDragStartY.current; // inverted: drag down = zoom in (larger step)
-      const sensitivity = 4;
-      const newStep = Math.max(25, Math.round((axisDragStartStep.current + dy * sensitivity) / 25) * 25);
-      onStepChange(newStep);
+    // Price axis drag → adjust vertical zoom (row height only)
+    if (isDraggingAxis.current) {
+      const dy = axisDragStartY.current - y; // drag up = taller rows
+      const newZoomV = Math.max(0.1, Math.min(4.0, axisDragStartZoomV.current * (1 + dy * 0.008)));
+      setZoomV(newZoomV);
       return;
     }
 
-    // Time axis drag → adjust horizontal zoom
+    // Time axis drag → adjust horizontal zoom (column width only)
     if (isDraggingTimeAxis.current) {
       const dx = x - timeAxisDragStartX.current;
-      const sensitivity = 0.005;
-      const newZoom = Math.max(0.1, Math.min(3.0, timeAxisDragStartZoom.current + dx * sensitivity));
-      setZoom(newZoom);
+      const newZoomH = Math.max(0.05, Math.min(3.0, timeAxisDragStartZoomH.current * (1 + dx * 0.008)));
+      setZoomH(newZoomH);
       return;
     }
 
@@ -832,11 +831,11 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
   // Wheel interaction for scrolling and zooming
   const handleWheel = (e) => {
     if (e.ctrlKey) {
-      // Zoom in/out
+      // Horizontal zoom in/out (column width)
       if (e.deltaY < 0) {
-        setZoom(z => Math.min(2.5, z + 0.1));
+        setZoomH(z => Math.min(3.0, z * 1.1));
       } else {
-        setZoom(z => Math.max(0.3, z - 0.1));
+        setZoomH(z => Math.max(0.05, z * 0.9));
       }
       return;
     }
@@ -861,27 +860,27 @@ export default function FootprintCanvas({ clusters, tickSize = 1.0, stepMultipli
       />
       <div className="absolute bottom-4 left-4 flex gap-2 items-center bg-darkBg/50 p-2 rounded-xl backdrop-blur-md border border-slate-800">
         <button
-          onClick={() => setZoom(z => Math.max(0.3, z - 0.1))}
+          onClick={() => setZoomH(z => Math.max(0.05, z * 0.85))}
           className="w-8 h-8 flex items-center justify-center bg-darkPanel border border-slate-700 rounded-lg text-lg font-bold text-slate-300 hover:text-white hover:bg-slate-800 transition"
-          title="Zoom Out"
+          title="Zoom Horizontal Out"
         >
           -
         </button>
-        <span className="text-xs font-mono text-slate-400 min-w-[35px] text-center">
-          {Math.round(zoom * 100)}%
+        <span className="text-xs font-mono text-slate-400 min-w-[50px] text-center">
+          {Math.round(zoomH * 100)}%
         </span>
         <button
-          onClick={() => setZoom(z => Math.min(2.5, z + 0.1))}
+          onClick={() => setZoomH(z => Math.min(3.0, z * 1.15))}
           className="w-8 h-8 flex items-center justify-center bg-darkPanel border border-slate-700 rounded-lg text-lg font-bold text-slate-300 hover:text-white hover:bg-slate-800 transition"
-          title="Zoom In"
+          title="Zoom Horizontal In"
         >
           +
         </button>
-        
+
         <div className="w-px h-6 bg-slate-700 mx-1"></div>
 
         <button
-          onClick={() => { setScrollOffset({ x: 50, y: 0 }); setZoom(1); }}
+          onClick={() => { setScrollOffset({ x: 50, y: 0 }); setZoomH(1); setZoomV(1); }}
           className="px-4 py-1.5 bg-darkPanel border border-slate-700 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800 transition"
         >
           Reset View
