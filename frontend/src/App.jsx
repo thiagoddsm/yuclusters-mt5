@@ -346,21 +346,56 @@ export default function App() {
                 </select>
               </div>
 
-              {/* Delta Max */}
+              {/* Threshold por modo */}
               {closeMode === 'delta' && (
                 <div>
                   <span className="text-[10px] text-slate-500 font-bold block mb-1">DELTA MÁX</span>
                   <div className="flex items-center bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
                     <button onClick={() => { setDeltaMax(d => Math.max(100, d - 100)); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
-                    <input
-                      type="number"
-                      min="100"
-                      step="100"
-                      value={deltaMax}
+                    <input type="number" min="100" step="100" value={deltaMax}
                       onChange={e => { setDeltaMax(Math.max(100, Number(e.target.value) || 100)); setConfigDirty(true); }}
                       className="flex-1 bg-transparent text-center text-sm font-bold text-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
                     <button onClick={() => { setDeltaMax(d => d + 100); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
+                  </div>
+                </div>
+              )}
+              {closeMode === 'volume' && (
+                <div>
+                  <span className="text-[10px] text-slate-500 font-bold block mb-1">VOLUME MÁX</span>
+                  <div className="flex items-center bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
+                    <button onClick={() => { setVolumeMax(v => Math.max(100, v - 100)); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
+                    <input type="number" min="100" step="100" value={volumeMax}
+                      onChange={e => { setVolumeMax(Math.max(100, Number(e.target.value) || 100)); setConfigDirty(true); }}
+                      className="flex-1 bg-transparent text-center text-sm font-bold text-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <button onClick={() => { setVolumeMax(v => v + 100); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
+                  </div>
+                </div>
+              )}
+              {closeMode === 'time' && (
+                <div>
+                  <span className="text-[10px] text-slate-500 font-bold block mb-1">TEMPO (segundos)</span>
+                  <div className="flex items-center bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
+                    <button onClick={() => { setTimeSeconds(t => Math.max(10, t - 30)); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
+                    <input type="number" min="10" step="30" value={timeSeconds}
+                      onChange={e => { setTimeSeconds(Math.max(10, Number(e.target.value) || 10)); setConfigDirty(true); }}
+                      className="flex-1 bg-transparent text-center text-sm font-bold text-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <button onClick={() => { setTimeSeconds(t => t + 30); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
+                  </div>
+                </div>
+              )}
+              {closeMode === 'range' && (
+                <div>
+                  <span className="text-[10px] text-slate-500 font-bold block mb-1">RANGE (pontos)</span>
+                  <div className="flex items-center bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
+                    <button onClick={() => { setRangePoints(r => Math.max(1, r - 1)); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
+                    <input type="number" min="1" step="1" value={rangePoints}
+                      onChange={e => { setRangePoints(Math.max(1, Number(e.target.value) || 1)); setConfigDirty(true); }}
+                      className="flex-1 bg-transparent text-center text-sm font-bold text-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <button onClick={() => { setRangePoints(r => r + 1); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
                   </div>
                 </div>
               )}
@@ -418,60 +453,6 @@ export default function App() {
                   </div>
                 </div>
                 
-                <div className="h-8 w-px bg-slate-800 hidden sm:block"></div>
-                
-                <div className="flex items-center gap-4">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500 font-bold mb-1">PRICE STEP</span>
-                    <div className="flex items-center bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
-                      <button onClick={() => setStepMultiplier(s => Math.max(1, s - 25))} className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800">-</button>
-                      <input
-                        type="number"
-                        min="1"
-                        value={stepMultiplier}
-                        onChange={e => setStepMultiplier(Math.max(1, Number(e.target.value) || 1))}
-                        className="px-1 py-1 text-sm font-bold text-white min-w-[52px] text-center bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      />
-                      <button onClick={() => setStepMultiplier(s => s + 25)} className="px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
-                    </div>
-                  </div>
-                  
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500 font-bold mb-1">VIEW MODE</span>
-                    <div className="flex bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
-                      <button 
-                        onClick={() => setViewMode('bidask')} 
-                        className={`px-3 py-1 text-xs font-semibold ${viewMode === 'bidask' ? 'bg-[#00E676] text-slate-900' : 'text-slate-400 hover:bg-slate-800'}`}
-                      >
-                        Bid x Ask
-                      </button>
-                      <button 
-                        onClick={() => setViewMode('delta')} 
-                        className={`px-3 py-1 text-xs font-semibold ${viewMode === 'delta' ? 'bg-[#00E676] text-slate-900' : 'text-slate-400 hover:bg-slate-800'}`}
-                      >
-                        Delta
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-4 mt-4">
-                  <div className="flex flex-col flex-1">
-                    <div className="flex justify-between mb-1">
-                      <span className="text-[10px] text-slate-500 font-bold">IMBALANCE RATIO</span>
-                      <span className="text-[10px] font-mono text-slate-300">{imbalanceRatio}%</span>
-                    </div>
-                    <input 
-                      type="range" 
-                      min="150" 
-                      max="500" 
-                      step="10" 
-                      value={imbalanceRatio} 
-                      onChange={(e) => setImbalanceRatio(parseInt(e.target.value))}
-                      className="w-full accent-[#00B0FF] bg-slate-800 rounded-lg h-1.5 appearance-none cursor-pointer"
-                    />
-                  </div>
-                </div>
               </div>
               <div className="flex justify-between items-center text-xs mt-4 border-t border-slate-800 pt-4">
                 <span className="text-slate-400">Closed Clusters:</span>
@@ -480,94 +461,6 @@ export default function App() {
             </div>
           </section>
 
-          {/* Cluster Formation Config */}
-          <section className="bg-[#151B26] border border-slate-800 rounded-xl p-5 shadow-lg">
-            <h2 className="text-sm font-semibold text-slate-300 mb-4 border-b border-slate-800 pb-2">
-              Cluster Formation
-            </h2>
-            <div className="space-y-4 text-xs">
-              {/* Close mode */}
-              <div>
-                <span className="text-[10px] text-slate-500 font-bold block mb-1">CLOSE MODE</span>
-                <div className="flex bg-[#0B0E14] border border-slate-700 rounded-md overflow-hidden">
-                  {['delta', 'range', 'time', 'volume'].map(m => (
-                    <button
-                      key={m}
-                      onClick={() => { setCloseMode(m); setConfigDirty(true); }}
-                      className={`flex-1 py-1 text-[10px] font-semibold uppercase ${closeMode === m ? 'bg-[#00E676] text-slate-900' : 'text-slate-400 hover:bg-slate-800'}`}
-                    >{m}</button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Range thresholds */}
-              {closeMode === 'delta' && (
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <span className="text-[10px] text-slate-500 font-bold">DELTA THRESHOLD</span>
-                    <span className="text-[10px] font-mono text-slate-300">{deltaMax.toLocaleString()}</span>
-                  </div>
-                  <input
-                    type="range" min="100" max="10000" step="50"
-                    value={deltaMax}
-                    onChange={e => { setDeltaMax(Number(e.target.value)); setConfigDirty(true); }}
-                    className="w-full accent-[#00E676] bg-slate-800 rounded-lg h-1.5 appearance-none cursor-pointer"
-                  />
-                </div>
-              )}
-              {closeMode === 'volume' && (
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <span className="text-[10px] text-slate-500 font-bold">VOLUME THRESHOLD</span>
-                    <span className="text-[10px] font-mono text-slate-300">{volumeMax.toLocaleString()}</span>
-                  </div>
-                  <input
-                    type="range" min="100" max="20000" step="100"
-                    value={volumeMax}
-                    onChange={e => { setVolumeMax(Number(e.target.value)); setConfigDirty(true); }}
-                    className="w-full accent-[#00E676] bg-slate-800 rounded-lg h-1.5 appearance-none cursor-pointer"
-                  />
-                </div>
-              )}
-              {closeMode === 'time' && (
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <span className="text-[10px] text-slate-500 font-bold">TIME THRESHOLD (seconds)</span>
-                    <span className="text-[10px] font-mono text-slate-300">{timeSeconds}s</span>
-                  </div>
-                  <input
-                    type="range" min="30" max="3600" step="30"
-                    value={timeSeconds}
-                    onChange={e => { setTimeSeconds(Number(e.target.value)); setConfigDirty(true); }}
-                    className="w-full accent-[#00E676] bg-slate-800 rounded-lg h-1.5 appearance-none cursor-pointer"
-                  />
-                </div>
-              )}
-              {closeMode === 'range' && (
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <span className="text-[10px] text-slate-500 font-bold">RANGE THRESHOLD (points)</span>
-                    <span className="text-[10px] font-mono text-slate-300">{rangePoints}</span>
-                  </div>
-                  <input
-                    type="range" min="1" max="500" step="1"
-                    value={rangePoints}
-                    onChange={e => { setRangePoints(Number(e.target.value)); setConfigDirty(true); }}
-                    className="w-full accent-[#00E676] bg-slate-800 rounded-lg h-1.5 appearance-none cursor-pointer"
-                  />
-                </div>
-              )}
-
-              {/* Apply button */}
-              <button
-                onClick={() => applyConfig(closeMode, deltaMax, volumeMax, timeSeconds, rangePoints)}
-                disabled={!configDirty}
-                className={`w-full py-1.5 rounded-md text-xs font-semibold transition ${configDirty ? 'bg-[#00E676] text-slate-900 hover:bg-[#00c853]' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}
-              >
-                {configDirty ? 'Apply' : 'Applied'}
-              </button>
-            </div>
-          </section>
 
           {/* Aggregator Settings Rules Indicator */}
           <section className="bg-[#151B26] border border-slate-800 rounded-xl p-5 shadow-lg flex-1">
