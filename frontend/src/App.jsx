@@ -25,7 +25,8 @@ export default function App() {
   const [volumeMax, setVolumeMax] = useState(1000);
   const [timeSeconds, setTimeSeconds] = useState(300);
   const [rangePoints, setRangePoints] = useState(10);
-  const [configDirty, setConfigDirty] = useState(false);
+  const [configDirty, setConfigDirty] = useState(false);   // qualquer campo mudou
+  const [backendDirty, setBackendDirty] = useState(false); // só campos que precisam do backend
   const [targetSymbol, setTargetSymbol] = useState('EURUSD');
 
   // History Mode
@@ -336,7 +337,7 @@ export default function App() {
                 <span className="text-[10px] text-slate-500 font-bold block mb-1">MODO DE FECHAMENTO</span>
                 <select
                   value={closeMode}
-                  onChange={e => { setCloseMode(e.target.value); setConfigDirty(true); }}
+                  onChange={e => { setCloseMode(e.target.value); setConfigDirty(true); setBackendDirty(true); }}
                   className="w-full bg-[#151B26] border border-slate-700 rounded-md px-2 py-1.5 text-xs text-slate-300 outline-none"
                 >
                   <option value="delta">Delta</option>
@@ -351,12 +352,12 @@ export default function App() {
                 <div>
                   <span className="text-[10px] text-slate-500 font-bold block mb-1">DELTA MÁX</span>
                   <div className="flex items-center bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
-                    <button onClick={() => { setDeltaMax(d => Math.max(100, d - 100)); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
+                    <button onClick={() => { setDeltaMax(d => Math.max(100, d - 100)); setConfigDirty(true); setBackendDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
                     <input type="number" min="100" step="100" value={deltaMax}
-                      onChange={e => { setDeltaMax(Math.max(100, Number(e.target.value) || 100)); setConfigDirty(true); }}
+                      onChange={e => { setDeltaMax(Math.max(100, Number(e.target.value) || 100)); setConfigDirty(true); setBackendDirty(true); }}
                       className="flex-1 bg-transparent text-center text-sm font-bold text-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
-                    <button onClick={() => { setDeltaMax(d => d + 100); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
+                    <button onClick={() => { setDeltaMax(d => d + 100); setConfigDirty(true); setBackendDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
                   </div>
                 </div>
               )}
@@ -364,12 +365,12 @@ export default function App() {
                 <div>
                   <span className="text-[10px] text-slate-500 font-bold block mb-1">VOLUME MÁX</span>
                   <div className="flex items-center bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
-                    <button onClick={() => { setVolumeMax(v => Math.max(100, v - 100)); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
+                    <button onClick={() => { setVolumeMax(v => Math.max(100, v - 100)); setConfigDirty(true); setBackendDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
                     <input type="number" min="100" step="100" value={volumeMax}
-                      onChange={e => { setVolumeMax(Math.max(100, Number(e.target.value) || 100)); setConfigDirty(true); }}
+                      onChange={e => { setVolumeMax(Math.max(100, Number(e.target.value) || 100)); setConfigDirty(true); setBackendDirty(true); }}
                       className="flex-1 bg-transparent text-center text-sm font-bold text-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
-                    <button onClick={() => { setVolumeMax(v => v + 100); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
+                    <button onClick={() => { setVolumeMax(v => v + 100); setConfigDirty(true); setBackendDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
                   </div>
                 </div>
               )}
@@ -377,12 +378,12 @@ export default function App() {
                 <div>
                   <span className="text-[10px] text-slate-500 font-bold block mb-1">TEMPO (segundos)</span>
                   <div className="flex items-center bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
-                    <button onClick={() => { setTimeSeconds(t => Math.max(10, t - 30)); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
+                    <button onClick={() => { setTimeSeconds(t => Math.max(10, t - 30)); setConfigDirty(true); setBackendDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
                     <input type="number" min="10" step="30" value={timeSeconds}
-                      onChange={e => { setTimeSeconds(Math.max(10, Number(e.target.value) || 10)); setConfigDirty(true); }}
+                      onChange={e => { setTimeSeconds(Math.max(10, Number(e.target.value) || 10)); setConfigDirty(true); setBackendDirty(true); }}
                       className="flex-1 bg-transparent text-center text-sm font-bold text-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
-                    <button onClick={() => { setTimeSeconds(t => t + 30); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
+                    <button onClick={() => { setTimeSeconds(t => t + 30); setConfigDirty(true); setBackendDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
                   </div>
                 </div>
               )}
@@ -390,19 +391,24 @@ export default function App() {
                 <div>
                   <span className="text-[10px] text-slate-500 font-bold block mb-1">RANGE (pontos)</span>
                   <div className="flex items-center bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
-                    <button onClick={() => { setRangePoints(r => Math.max(1, r - 1)); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
+                    <button onClick={() => { setRangePoints(r => Math.max(1, r - 1)); setConfigDirty(true); setBackendDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
                     <input type="number" min="1" step="1" value={rangePoints}
-                      onChange={e => { setRangePoints(Math.max(1, Number(e.target.value) || 1)); setConfigDirty(true); }}
+                      onChange={e => { setRangePoints(Math.max(1, Number(e.target.value) || 1)); setConfigDirty(true); setBackendDirty(true); }}
                       className="flex-1 bg-transparent text-center text-sm font-bold text-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
-                    <button onClick={() => { setRangePoints(r => r + 1); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
+                    <button onClick={() => { setRangePoints(r => r + 1); setConfigDirty(true); setBackendDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
                   </div>
                 </div>
               )}
 
-              {/* Apply */}
+              {/* Apply — só chama backend se campos do backend mudaram */}
               <button
-                onClick={() => { applyConfig(closeMode, deltaMax, volumeMax, timeSeconds, rangePoints); setShowChartSettings(false); }}
+                onClick={() => {
+                  if (backendDirty) applyConfig(closeMode, deltaMax, volumeMax, timeSeconds, rangePoints);
+                  setConfigDirty(false);
+                  setBackendDirty(false);
+                  setShowChartSettings(false);
+                }}
                 disabled={!configDirty}
                 className={`w-full py-1.5 rounded-md text-xs font-semibold transition ${configDirty ? 'bg-[#00E676] text-slate-900 hover:bg-[#00c853]' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}
               >
