@@ -14,10 +14,10 @@ export default function App() {
   const [lastBid, setLastBid] = useState(0);
   const [lastAsk, setLastAsk] = useState(0);
 
-  // Phase 2 & 4 Settings
-  const [stepMultiplier, setStepMultiplier] = useState(75);
-  const [viewMode, setViewMode] = useState('bidask'); // 'bidask' or 'delta'
-  const [imbalanceRatio, setImbalanceRatio] = useState(300); // percentage
+  // Phase 2 & 4 Settings — persistidos no localStorage
+  const [stepMultiplier, setStepMultiplier] = useState(() => Number(localStorage.getItem('yc_step') || 75));
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('yc_viewmode') || 'bidask');
+  const [imbalanceRatio, setImbalanceRatio] = useState(300);
 
   // Cluster aggregator config
   const [closeMode, setCloseMode] = useState('delta');
@@ -134,6 +134,10 @@ export default function App() {
   }, [fetchHistory, pushToast]);
 
   const wsStatus = useWebSocket(WS_URL, handleWebSocketMessage);
+
+  // Persistência local
+  useEffect(() => { localStorage.setItem('yc_step', stepMultiplier); }, [stepMultiplier]);
+  useEffect(() => { localStorage.setItem('yc_viewmode', viewMode); }, [viewMode]);
 
   useEffect(() => {
     fetchHistory();
