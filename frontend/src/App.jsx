@@ -319,15 +319,15 @@ export default function App() {
               <div>
                 <span className="text-[10px] text-slate-500 font-bold block mb-1">PASSO DO PREÇO (ticks)</span>
                 <div className="flex items-center bg-[#151B26] border border-slate-700 rounded-md overflow-hidden">
-                  <button onClick={() => setStepMultiplier(s => Math.max(1, s - 25))} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
+                  <button onClick={() => { setStepMultiplier(s => Math.max(1, s - 25)); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">−</button>
                   <input
                     type="number"
                     min="1"
                     value={stepMultiplier}
-                    onChange={e => setStepMultiplier(Math.max(1, Number(e.target.value) || 1))}
+                    onChange={e => { setStepMultiplier(Math.max(1, Number(e.target.value) || 1)); setConfigDirty(true); }}
                     className="flex-1 bg-transparent text-center text-sm font-bold text-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
-                  <button onClick={() => setStepMultiplier(s => s + 25)} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
+                  <button onClick={() => { setStepMultiplier(s => s + 25); setConfigDirty(true); }} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800">+</button>
                 </div>
               </div>
 
